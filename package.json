@@ -1,0 +1,29 @@
+{
+  "name": "sanemail",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun scripts/dev.mjs",
+    "start": "bun apps/api/src/server.mjs",
+    "seed": "bun apps/api/src/dev-seed.mjs",
+    "demo:reset": "bun apps/api/src/demo-reset.mjs",
+    "ai:run": "bun apps/api/src/ai-run.mjs",
+    "ai:verify": "bun apps/api/src/ai-verify.mjs",
+    "build": "bun run --cwd apps/web build",
+    "check": "node --check apps/api/src/server.mjs && node --check apps/api/src/config.mjs && node --check apps/api/src/store.mjs && node --check apps/api/src/gmail.mjs && node --check apps/api/src/classifier.mjs && node --check apps/api/src/demo-data.mjs && node --check apps/api/src/ai/prompts.mjs && node --check apps/api/src/ai/pipeline.mjs && node --check apps/api/src/ai/verification.mjs && node --check apps/api/src/ai-run.mjs && node --check apps/api/src/ai-verify.mjs && node --check apps/api/src/demo-reset.mjs && node --check apps/api/src/dev-seed.mjs && node --check scripts/smoke.mjs && bun run --cwd apps/web typecheck",
+    "test": "node --test",
+    "smoke": "bun run build && node scripts/smoke.mjs",
+    "e2e": "bun run build && bun run --cwd apps/web playwright test --config ../../playwright.config.ts",
+    "e2e:headed": "bun run build && bun run --cwd apps/web playwright test --config ../../playwright.config.ts --headed",
+    "verify": "bun run check && bun run test && bun run ai:verify && bun run smoke"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "typescript": "^5.9.3"
+  }
+}

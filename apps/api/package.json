@@ -1,0 +1,11 @@
+{
+  "name": "@sanemail/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun src/server.mjs",
+    "start": "bun src/server.mjs",
+    "seed": "bun src/dev-seed.mjs"
+  }
+}

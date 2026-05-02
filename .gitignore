@@ -1,0 +1,9 @@
+.env
+data/
+node_modules/
+apps/web/dist/
+apps/web/tsconfig.tsbuildinfo
+.e2e-data/
+test-results/
+playwright-report/
+.DS_Store

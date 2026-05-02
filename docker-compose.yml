@@ -1,0 +1,21 @@
+services:
+  sanemail:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      APP_ORIGIN: http://localhost:3000
+      WEB_ORIGIN: http://localhost:3000
+      DATA_DIR: /data
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3000/oauth/google/callback}
+      SYNC_MESSAGE_LIMIT: ${SYNC_MESSAGE_LIMIT:-50}
+      SYNC_QUERY: ${SYNC_QUERY:-newer_than:90d -in:chats}
+    volumes:
+      - sanemail-data:/data
+
+volumes:
+  sanemail-data:
