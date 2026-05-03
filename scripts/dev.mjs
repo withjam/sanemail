@@ -6,6 +6,15 @@ const env = {
   HOST: process.env.HOST || "127.0.0.1",
   APP_ORIGIN: process.env.APP_ORIGIN || "http://localhost:3000",
   WEB_ORIGIN: process.env.WEB_ORIGIN || "http://localhost:5173",
+  PHOENIX_ENABLED: process.env.PHOENIX_ENABLED || "true",
+  PHOENIX_PROJECT_NAME: process.env.PHOENIX_PROJECT_NAME || "Sanemail",
+  PHOENIX_COLLECTOR_ENDPOINT:
+    process.env.PHOENIX_COLLECTOR_ENDPOINT || "http://localhost:6006",
+  OPENINFERENCE_HIDE_INPUTS: process.env.OPENINFERENCE_HIDE_INPUTS || "true",
+  OPENINFERENCE_HIDE_INPUT_MESSAGES:
+    process.env.OPENINFERENCE_HIDE_INPUT_MESSAGES || "true",
+  OPENINFERENCE_HIDE_EMBEDDINGS_VECTORS:
+    process.env.OPENINFERENCE_HIDE_EMBEDDINGS_VECTORS || "true",
 };
 
 const processes = [

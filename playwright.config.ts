@@ -37,6 +37,8 @@ export default defineConfig({
       APP_ORIGIN: origin,
       WEB_ORIGIN: origin,
       DATA_DIR: ".e2e-data",
+      AI_PROVIDER: "mock",
+      PHOENIX_ENABLED: "false",
     },
   },
 });

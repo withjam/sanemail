@@ -10,7 +10,7 @@ import "./styles.css";
 
 const persister = createSyncStoragePersister({
   storage: window.localStorage,
-  key: "sanemail-query-cache",
+  key: "sanemail-query-cache-v2",
 });
 
 registerSW({ immediate: true });

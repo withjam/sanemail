@@ -36,14 +36,32 @@ Runs the synthetic mailbox eval without writing to local app state. The current
 suite checks action requests, deadlines, automated FYI mail, and scam/spam
 routing.
 
+If local Phoenix is running on port 6006, send traces while running the suite:
+
+```sh
+PHOENIX_ENABLED=true bun run ai:verify
+```
+
+To test the real Ollama Cloud provider against the local 200-message demo
+mailbox:
+
+```sh
+ollama pull deepseek-v4-pro:cloud
+AI_PROVIDER=ollama OLLAMA_MODEL=deepseek-v4-pro:cloud OLLAMA_THINK=high bun run ai:run
+```
+
+The Ollama path retries transient cloud errors and falls back to the deterministic
+mock decision when `AI_FALLBACK_TO_MOCK=true`.
+
 ### HTTP Smoke Test
 
 ```sh
 bun run smoke
 ```
 
-Builds the React PWA, creates an isolated temp data directory, seeds demo mail,
-starts the API on a random local port, and checks:
+Builds the React PWA, creates an isolated temp data directory, seeds the
+200-message golden demo mailbox, starts the API on a random local port, and
+checks:
 
 - built app shell at `/`
 - `/api/status`
@@ -63,8 +81,8 @@ bun run e2e
 ```
 
 Builds the React PWA, starts the API on an isolated local port with `.e2e-data`,
-resets demo data through `/api/demo/reset`, and drives the real app in
-Playwright desktop Chromium and a mobile Chrome viewport.
+resets the 200-message demo mailbox through `/api/demo/reset`, and drives the
+real app in Playwright desktop Chromium and a mobile Chrome viewport.
 
 The E2E covers:
 
@@ -101,6 +119,9 @@ bun run seed
 bun run dev
 ```
 
+`bun run seed` writes the deterministic 200-message golden mailbox into the
+local store.
+
 Open:
 
 ```text
@@ -120,6 +141,18 @@ Then open AI Ops:
 
 ```text
 http://localhost:5173/ai
+```
+
+`bun run dev` enables local Phoenix tracing by default. Open Phoenix at:
+
+```text
+http://localhost:6006
+```
+
+If Phoenix is not running, either start it or disable tracing for the dev server:
+
+```sh
+PHOENIX_ENABLED=false bun run dev
 ```
 
 ## Docker Run

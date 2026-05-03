@@ -78,6 +78,15 @@ export type MessagesResponse = {
   messages: MailMessage[];
 };
 
+export type HomeResponse = {
+  briefing: InboxBriefing;
+  tabs: {
+    mostRecent: MailMessage[];
+    needsReply: MailMessage[];
+    upcoming: MailMessage[];
+  };
+};
+
 export type MessageResponse = {
   message: MailMessage;
 };
@@ -126,6 +135,7 @@ export type AiDecision = {
   messageId: string;
   subject: string;
   from: string;
+  deliveredAt?: string;
   category: SaneCategory;
   needsReply: boolean;
   possibleJunk: boolean;
@@ -134,6 +144,12 @@ export type AiDecision = {
   confidence: number;
   recsysScore: number;
   suppressFromToday: boolean;
+  temporal?: {
+    deliveredAt: string;
+    ageHours: number;
+    recent: boolean;
+    within7Days: boolean;
+  };
   reasons: string[];
   extracted: {
     actions: string[];
@@ -154,6 +170,74 @@ export type AiDecision = {
   };
 };
 
+export type InboxBriefing = {
+  text: string;
+  narrative?: {
+    status: string;
+    needToKnow: string;
+    mightBeMissing: string;
+    needsAttention: string;
+  };
+  callouts?: Array<{
+    id: string;
+    kind: "attention" | "new_attention" | "carry_over";
+    label: string;
+    title: string;
+    body: string;
+    messageId?: string;
+    messageIds: string[];
+    priority: number;
+    deliveredAt?: string;
+  }>;
+  generatedAt: string;
+  source: string;
+  model: string;
+  prompt?: {
+    id: string;
+    version: string;
+    hash: string;
+  };
+  counts: {
+    visible: number;
+    recent: number;
+    last7Days: number;
+    needsReply: number;
+    needsReplyLast7?: number;
+    upcoming: number;
+    informational: number;
+    hidden: number;
+    carriedOver?: number;
+  };
+  messageIds: string[];
+  carryOver?: {
+    previousBriefingId: string | null;
+    previousGeneratedAt: string | null;
+    messageIds: string[];
+    subjects: string[];
+  };
+  runId?: string | null;
+  provider?: AiRun["provider"] | null;
+  stale?: boolean;
+};
+
+export type PhoenixObservabilityStatus = {
+  enabled: boolean;
+  initialized: boolean;
+  available: boolean;
+  projectName: string;
+  collectorEndpoint: string;
+  appUrl: string;
+  batch: boolean;
+  privacy: {
+    sensitiveContent: "allowed" | "redacted";
+    inputsHidden: boolean;
+    embeddingVectorsHidden: boolean;
+  };
+  error: string | null;
+  traceId?: string | null;
+  tracedAt?: string;
+};
+
 export type AiRun = {
   id: string;
   kind: string;
@@ -163,18 +247,30 @@ export type AiRun = {
     name: string;
     model: string;
     temperature: number;
+    think?: string | boolean;
+    host?: string;
+    requestedProvider?: string;
+    requestedModel?: string;
+    fallbackToMock?: boolean;
+    fallbackErrors?: Array<{ messageId: string; error: string }>;
   };
   promptRefs: AiPromptRef[];
   input: {
     accountId: string | null;
     messageCount: number;
     corpusHash: string;
+    previousBriefing?: {
+      id: string | null;
+      generatedAt: string | null;
+      hash: string;
+    } | null;
     messageHashes: Array<{ messageId: string; inputHash: string }>;
   };
   output: {
     decisions: AiDecision[];
     curatedMessageIds: string[];
     topTodayMessageIds: string[];
+    briefing?: InboxBriefing;
   };
   metrics: {
     latencyMs: number;
@@ -183,6 +279,10 @@ export type AiRun = {
     estimatedCompletionTokens: number;
     categoryCounts: Record<string, number>;
     averageConfidence: number;
+    providerLatencyMs?: number;
+    ollamaPromptEvalCount?: number;
+    ollamaEvalCount?: number;
+    ollamaThinkingChars?: number;
   };
   spans: Array<{
     name: string;
@@ -193,6 +293,7 @@ export type AiRun = {
   startedAt: string;
   completedAt: string;
   createdAt: string;
+  observability?: PhoenixObservabilityStatus;
 };
 
 export type AiVerificationRun = {
@@ -233,10 +334,12 @@ export type AiVerificationRun = {
   startedAt: string;
   completedAt: string;
   createdAt: string;
+  observability?: PhoenixObservabilityStatus;
 };
 
 export type AiControlResponse = {
   prompts: AiPromptRecord[];
+  observability: PhoenixObservabilityStatus;
   latestRun: AiRun | null;
   runs: AiRun[];
   latestVerification: AiVerificationRun | null;

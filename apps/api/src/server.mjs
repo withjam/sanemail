@@ -16,6 +16,7 @@ import {
   clearLocalData,
   consumeOAuthState,
   getPrimaryAccount,
+  latestInboxBriefing,
   listAiRuns,
   listVerificationRuns,
   readStore,
@@ -27,8 +28,9 @@ import {
 import { getClassifiedMessages } from "./classifier.mjs";
 import { resetDemoData } from "./demo-data.mjs";
 import { getPromptRecords } from "./ai/prompts.mjs";
-import { runAiLoop } from "./ai/pipeline.mjs";
+import { buildInboxBriefing, runAiLoop } from "./ai/pipeline.mjs";
 import { runSyntheticVerification } from "./ai/verification.mjs";
+import { getPhoenixStatus } from "./ai/phoenix.mjs";
 
 const config = loadConfig();
 const webDistDir = path.join(process.cwd(), "apps", "web", "dist");
@@ -78,6 +80,35 @@ function getTodayMessages(store, account) {
     .filter((message) => message.sane.category === "Today" || message.sane.needsReply)
     .sort((a, b) => b.sane.todayScore - a.sane.todayScore)
     .slice(0, 30);
+}
+
+function latestAiRun(store) {
+  return [...(store.aiRuns || [])].sort(
+    (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime(),
+  )[0] || null;
+}
+
+function decisionMap(run) {
+  return new Map((run?.output?.decisions || []).map((decision) => [decision.messageId, decision]));
+}
+
+function hasUpcomingSignal(message, decision) {
+  const text = `${message.subject || ""}\n${message.snippet || ""}\n${message.bodyText || ""}`.toLowerCase();
+  return (
+    (decision?.extracted?.deadlines || []).length > 0 ||
+    (decision?.extracted?.actions || []).some((action) =>
+      ["pay", "schedule", "confirm", "sign", "review"].includes(action),
+    ) ||
+    /\b(deadline|due|tomorrow|bill|statement|flight|check-in|appointment|reservation)\b|\bby\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+(morning|afternoon|evening)\b/.test(
+      text,
+    )
+  );
+}
+
+function messageAgeHours(message) {
+  const time = new Date(message.date || Number(message.internalDate) || 0).getTime();
+  if (!Number.isFinite(time)) return 9999;
+  return Math.max(0, (Date.now() - time) / 36e5);
 }
 
 function publicAccount(account) {
@@ -148,6 +179,62 @@ async function routeToday(response) {
   sendJson(response, { messages: getTodayMessages(store, account) });
 }
 
+async function routeHome(response) {
+  const store = await readStore();
+  const account = store.accounts[0] || null;
+  const messages = getMessageList(store, account);
+  const visibleMessages = messages.filter((message) => !message.sane.possibleJunk);
+  const run = latestAiRun(store);
+  const storedBriefing = latestInboxBriefing(store, account?.id);
+  const decisions = decisionMap(run);
+  const briefing =
+    storedBriefing ||
+    run?.output?.briefing ||
+    buildInboxBriefing(
+      visibleMessages.map((message) => {
+        const decision = decisions.get(message.id);
+        const upcomingSignal = hasUpcomingSignal(message, decision);
+        const ageHours = Number(messageAgeHours(message).toFixed(2));
+        return {
+          messageId: message.id,
+          subject: message.subject,
+          deliveredAt: message.date,
+          possibleJunk: message.sane.possibleJunk,
+          suppressFromToday: message.sane.possibleJunk,
+          automated: message.sane.automated,
+          needsReply: message.sane.needsReply,
+          recsysScore: message.sane.todayScore,
+          temporal: {
+            deliveredAt: message.date,
+            ageHours,
+            recent: ageHours <= 24,
+            within7Days: ageHours <= 168,
+          },
+          extracted: {
+            actions: decision?.extracted?.actions || [],
+            deadlines: decision?.extracted?.deadlines || (upcomingSignal ? ["upcoming"] : []),
+          },
+        };
+      }),
+      { previousBriefing: storedBriefing },
+    );
+  const upcoming = visibleMessages.filter((message) => hasUpcomingSignal(message, decisions.get(message.id)));
+
+  sendJson(response, {
+    briefing: {
+      ...briefing,
+      runId: briefing.runId || run?.id || null,
+      provider: briefing.provider || run?.provider || null,
+      stale: !storedBriefing && !run?.output?.briefing,
+    },
+    tabs: {
+      mostRecent: visibleMessages.slice(0, 8),
+      needsReply: visibleMessages.filter((message) => message.sane.needsReply).slice(0, 8),
+      upcoming: upcoming.slice(0, 8),
+    },
+  });
+}
+
 async function routeMessage(messageId, response) {
   const store = await readStore();
   const account = store.accounts[0] || null;
@@ -193,6 +280,7 @@ async function routeAiControl(response) {
   const verificationRuns = await listVerificationRuns(20);
   sendJson(response, {
     prompts: getPromptRecords(),
+    observability: getPhoenixStatus(),
     latestRun: runs[0] || null,
     runs,
     latestVerification: verificationRuns[0] || null,
@@ -305,6 +393,7 @@ async function handleApi(url, request, response) {
   const messageMatch = url.pathname.match(/^\/api\/messages\/(.+?)(\/feedback)?$/);
 
   if (request.method === "GET" && url.pathname === "/api/status") return routeStatus(response);
+  if (request.method === "GET" && url.pathname === "/api/home") return routeHome(response);
   if (request.method === "GET" && url.pathname === "/api/messages") return routeMessages(response);
   if (request.method === "GET" && url.pathname === "/api/today") return routeToday(response);
   if (request.method === "POST" && url.pathname === "/api/sync/gmail") return routeSyncGmail(response);

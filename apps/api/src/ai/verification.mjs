@@ -1,11 +1,17 @@
 import crypto from "node:crypto";
 import { buildDemoMessages } from "../demo-data.mjs";
 import { saveVerificationRun } from "../store.mjs";
+import {
+  evaluateGoldenPromptRecords,
+  getGoldenPreviousBriefing,
+  getGoldenPromptRecords,
+} from "./golden-records.mjs";
+import { traceVerificationRun } from "./phoenix.mjs";
 import { runAiLoopOnMessages } from "./pipeline.mjs";
 
 const suite = {
-  id: "synthetic-demo-mailbox-v1",
-  title: "Synthetic personal mailbox",
+  id: "synthetic-golden-mailbox-v1",
+  title: "Synthetic personal golden mailbox",
   threshold: 1,
   cases: [
     {
@@ -130,7 +136,10 @@ function evaluateCase(testCase, decision) {
 }
 
 export function getVerificationSuite() {
-  return suite;
+  return {
+    ...suite,
+    goldenRecords: getGoldenPromptRecords(),
+  };
 }
 
 export async function runSyntheticVerification({ persist = false } = {}) {
@@ -149,10 +158,20 @@ export async function runSyntheticVerification({ persist = false } = {}) {
     feedback: [],
     trigger: "verification",
   });
+  const carryOverRun = runAiLoopOnMessages({
+    account,
+    messages,
+    feedback: [],
+    trigger: "verification",
+    previousBriefing: getGoldenPreviousBriefing(),
+  });
   const decisionsById = new Map(
     aiRun.output.decisions.map((decision) => [decision.messageId, decision]),
   );
-  const cases = suite.cases.map((testCase) => evaluateCase(testCase, decisionsById.get(testCase.messageId)));
+  const cases = [
+    ...suite.cases.map((testCase) => evaluateCase(testCase, decisionsById.get(testCase.messageId))),
+    ...evaluateGoldenPromptRecords(aiRun, { carryOverRun }),
+  ];
   const checks = cases.flatMap((testCase) => testCase.checks);
   const passedChecks = checks.filter((check) => check.passed).length;
   const score = checks.length ? Number((passedChecks / checks.length).toFixed(4)) : 0;
@@ -186,6 +205,8 @@ export async function runSyntheticVerification({ persist = false } = {}) {
     completedAt,
     createdAt: completedAt,
   };
+
+  run.observability = await traceVerificationRun(run);
 
   if (persist) await saveVerificationRun(run);
   return run;

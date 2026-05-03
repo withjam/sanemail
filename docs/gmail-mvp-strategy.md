@@ -111,6 +111,11 @@ we must confirm that the model provider/data handling fits Google's Limited Use
 requirements and our privacy policy, especially around not using user email to
 train generalized models.
 
+See [Gmail AI Security And Model Provider Policy](/Users/ruckus/workspace/sanemail/docs/gmail-ai-security.md)
+for the current provider decision: mock/local by default, Ollama Cloud only for
+explicit dev/beta opt-in, and Vertex AI or self-hosted inference as the preferred
+production Gmail path.
+
 ## Compliance Workstream
 
 Minimum work before public Gmail launch:
@@ -167,6 +172,8 @@ Minimum work before public Gmail launch:
   https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.history/list
 - Google Workspace API user data policy:
   https://developers.google.com/workspace/workspace-api-user-data-developer-policy
+- Gmail AI security and model provider policy:
+  /Users/ruckus/workspace/sanemail/docs/gmail-ai-security.md
 - Google OAuth app audience and test-user limits:
   https://support.google.com/cloud/answer/15549945
 - Ollama Cloud:

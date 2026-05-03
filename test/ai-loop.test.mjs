@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildDemoMessages } from "../apps/api/src/demo-data.mjs";
+import { buildDemoMessages, DEMO_MESSAGE_COUNT } from "../apps/api/src/demo-data.mjs";
+import {
+  evaluateGoldenPromptRecords,
+  getGoldenPreviousBriefing,
+  getGoldenPromptRecords,
+} from "../apps/api/src/ai/golden-records.mjs";
 import { runAiLoopOnMessages } from "../apps/api/src/ai/pipeline.mjs";
 import { getPromptRecords, renderPrompt } from "../apps/api/src/ai/prompts.mjs";
 import { runSyntheticVerification } from "../apps/api/src/ai/verification.mjs";
@@ -38,8 +43,21 @@ test("AI loop creates instrumented decisions over synthetic mail", () => {
   const scam = decisions.get("gmail:demo@example.com:message:demo-security-scam");
 
   assert.equal(run.status, "succeeded");
-  assert.equal(run.metrics.messagesProcessed, 12);
-  assert.equal(run.promptRefs.length, 3);
+  assert.equal(run.metrics.messagesProcessed, DEMO_MESSAGE_COUNT);
+  assert.equal(run.promptRefs.length, 4);
+  assert.match(run.output.briefing.text, /mostly calm/);
+  assert.match(run.output.briefing.text, /need your attention/i);
+  assert.doesNotMatch(
+    run.output.briefing.text,
+    /visible messages|automated updates|previous briefing|carry forward|suspicious/i,
+  );
+  assert.equal(run.output.briefing.prompt.id, "mail-briefing");
+  assert.equal(run.output.briefing.counts.recent, 7);
+  assert.equal(run.output.briefing.counts.last7Days, 75);
+  assert.equal(run.output.briefing.callouts.length, 4);
+  assert.equal(run.output.briefing.callouts[0].messageId, "gmail:demo@example.com:message:demo-lease-review");
+  assert.equal(run.output.briefing.callouts[0].kind, "new_attention");
+  assert.equal(run.output.briefing.callouts[0].label, "Need attention");
   assert.equal(run.spans.some((span) => span.name === "model.mock_inference"), true);
   assert.equal(lease.category, "Needs Reply");
   assert.equal(lease.extracted.actions.includes("review"), true);
@@ -49,10 +67,42 @@ test("AI loop creates instrumented decisions over synthetic mail", () => {
   assert.equal(run.output.topTodayMessageIds.includes(scam.messageId), false);
 });
 
+test("golden aggregate prompt records evaluate day summary and category breakdown", () => {
+  const messages = buildDemoMessages(account);
+  const run = runAiLoopOnMessages({ account, messages, trigger: "test" });
+  const carryOverRun = runAiLoopOnMessages({
+    account,
+    messages,
+    previousBriefing: getGoldenPreviousBriefing(),
+    trigger: "test",
+  });
+  const records = getGoldenPromptRecords();
+  const cases = evaluateGoldenPromptRecords(run, { carryOverRun });
+
+  assert.deepEqual(
+    records.map((record) => record.id),
+    [
+      "golden-day-summary-v1",
+      "golden-day-summary-carryover-v1",
+      "golden-category-breakdown-v1",
+    ],
+  );
+  assert.equal(records.every((record) => /^[a-f0-9]{64}$/.test(record.hash)), true);
+  assert.equal(cases.length, 3);
+  assert.equal(cases.every((testCase) => testCase.passed), true);
+  assert.match(carryOverRun.output.briefing.text, /mostly calm/);
+  assert.doesNotMatch(carryOverRun.output.briefing.text, /previous briefing|carry forward/i);
+  assert.equal(carryOverRun.output.briefing.counts.carriedOver, 2);
+  assert.equal(carryOverRun.output.briefing.callouts.length, 4);
+  assert.equal(carryOverRun.output.briefing.callouts[0].kind, "carry_over");
+  assert.equal(carryOverRun.output.briefing.callouts[0].label, "Need attention");
+});
+
 test("synthetic verification suite passes with the local AI loop", async () => {
   const run = await runSyntheticVerification({ persist: false });
 
   assert.equal(run.status, "passed");
+  assert.equal(run.summary.cases, 8);
   assert.equal(run.summary.failedCases, 0);
   assert.equal(run.score, 1);
 });

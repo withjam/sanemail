@@ -15,6 +15,7 @@ import {
   Check,
   CheckCircle2,
   Clock3,
+  ExternalLink,
   FlaskConical,
   Inbox,
   Loader2,
@@ -31,18 +32,21 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
   AiRun,
   AiVerificationRun,
   FeedbackKind,
+  InboxBriefing,
   MailMessage,
+  PhoenixObservabilityStatus,
   StatusResponse,
 } from "@sanemail/shared/types";
 import {
   disconnect,
   getAiControl,
+  getHome,
   getMessage,
   getMessages,
   getStatus,
@@ -84,6 +88,26 @@ function classForCategory(category: string) {
   if (category === "FYI") return "pill muted-pill";
   return "pill";
 }
+
+function labelForCategory(category: string) {
+  return category === "Needs Reply" ? "Need attention" : category;
+}
+
+const defaultObservability: PhoenixObservabilityStatus = {
+  enabled: false,
+  initialized: false,
+  available: false,
+  projectName: "Sanemail",
+  collectorEndpoint: "http://localhost:6006",
+  appUrl: "http://localhost:6006",
+  batch: false,
+  privacy: {
+    sensitiveContent: "redacted",
+    inputsHidden: true,
+    embeddingVectorsHidden: true,
+  },
+  error: null,
+};
 
 function useStatus() {
   return useQuery({
@@ -201,46 +225,122 @@ function SyncButton({ status }: { status?: StatusResponse }) {
 
 function Dashboard() {
   const status = useStatus();
-  const today = useQuery({
-    queryKey: queryKeys.today,
-    queryFn: getToday,
+  const home = useQuery({
+    queryKey: queryKeys.home,
+    queryFn: getHome,
   });
+  const [activeTab, setActiveTab] = useState<"mostRecent" | "needsReply" | "upcoming">("mostRecent");
 
   if (status.isError) return <ErrorPanel title="Could not load status" error={status.error} />;
-  if (status.isLoading || !status.data) return <Loading label="Loading mailbox" />;
+  if (home.isError) return <ErrorPanel title="Could not load home" error={home.error} />;
+  if (status.isLoading || !status.data || home.isLoading || !home.data) return <Loading label="Loading mailbox" />;
 
   const statusData = status.data;
-  const counts = statusData.counts;
-  const topToday = today.data?.messages.slice(0, 4) || [];
+  const tabs = home.data.tabs;
+  const tabItems = [
+    { id: "mostRecent" as const, label: "Most recent", messages: tabs.mostRecent },
+    { id: "needsReply" as const, label: "Need attention", messages: tabs.needsReply },
+    { id: "upcoming" as const, label: "Upcoming", messages: tabs.upcoming },
+  ];
+  const active = tabItems.find((item) => item.id === activeTab) || tabItems[0];
 
   return (
     <div className="page-grid">
       <section className="page-heading">
         <h1>Today</h1>
-        <p>The small set worth looking at first.</p>
       </section>
-      <section className="stats-grid" aria-label="Mailbox summary" data-testid="mailbox-summary">
-        <Stat icon={Mail} label="Synced" value={counts.messages} testId="stat-synced" />
-        <Stat icon={CheckCircle2} label="Today" value={counts.today} testId="stat-today" />
-        <Stat icon={MessageSquare} label="Need reply" value={counts.needsReply} testId="stat-needs-reply" />
-        <Stat icon={ShieldAlert} label="Junk review" value={counts.junkReview} testId="stat-junk-review" />
-      </section>
+      <BriefingPanel briefing={home.data.briefing} />
       {!statusData.account && <ConnectPanel missing={statusData.configMissing} />}
-      <section className="surface">
-        <div className="section-header">
-          <div>
-            <h2>First pass</h2>
-            <p>{topToday.length ? "Ranked by current heuristics." : "Nothing is demanding attention yet."}</p>
-          </div>
-          <Link to="/today" className="button">
-            <CheckCircle2 size={17} />
-            Open Today
-          </Link>
+      <section className="surface flush">
+        <div className="home-tabs" role="tablist" aria-label="Inbox views">
+          {tabItems.map((item) => (
+            <button
+              key={item.id}
+              className={item.id === active.id ? "tab-button active" : "tab-button"}
+              type="button"
+              role="tab"
+              id={`home-tab-${item.id}`}
+              aria-selected={item.id === active.id}
+              aria-controls={`home-panel-${item.id}`}
+              onClick={() => setActiveTab(item.id)}
+              data-testid={`home-tab-${item.id}`}
+            >
+              <span>{item.label}</span>
+              <span className="tab-count">{item.messages.length}</span>
+            </button>
+          ))}
         </div>
-        <MessageStack messages={topToday} empty="Seed demo mail or connect Gmail to see messages." />
+        <div
+          role="tabpanel"
+          id={`home-panel-${active.id}`}
+          aria-labelledby={`home-tab-${active.id}`}
+        >
+          <MessageStack messages={active.messages} empty={emptyForHomeTab(active.id)} />
+        </div>
       </section>
     </div>
   );
+}
+
+function BriefingPanel({ briefing }: { briefing: InboxBriefing }) {
+  const paragraphs = briefing.narrative
+    ? [
+        briefing.narrative.status,
+        briefing.narrative.needToKnow,
+        briefing.narrative.mightBeMissing,
+        briefing.narrative.needsAttention,
+      ].filter(Boolean)
+    : [briefing.text];
+  const callouts = briefing.callouts || [];
+
+  return (
+    <section className="briefing-content" data-testid="inbox-briefing">
+      <div className="briefing-copy">
+        {paragraphs.map((paragraph) => (
+          <p key={paragraph}>{paragraph}</p>
+        ))}
+      </div>
+      {callouts.length > 0 && (
+        <div className="briefing-callouts" aria-label="Items needing attention">
+          {callouts.map((callout) => {
+            const content = (
+              <>
+                <span className={`briefing-callout-label ${callout.kind}`}>{callout.label}</span>
+                <strong>{callout.title}</strong>
+                <span>{callout.body}</span>
+              </>
+            );
+
+            if (!callout.messageId) {
+              return (
+                <div className="briefing-callout" key={callout.id}>
+                  {content}
+                </div>
+              );
+            }
+
+            return (
+              <Link
+                to="/message/$messageId"
+                params={{ messageId: callout.messageId }}
+                className="briefing-callout linked"
+                key={callout.id}
+                data-testid={`briefing-callout-${callout.kind}`}
+              >
+                {content}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function emptyForHomeTab(tab: "mostRecent" | "needsReply" | "upcoming") {
+  if (tab === "needsReply") return "Nothing needs attention right now.";
+  if (tab === "upcoming") return "No upcoming events, bills, or deadlines detected.";
+  return "No recent inbox messages to show.";
 }
 
 function ConnectPanel({ missing }: { missing: string[] }) {
@@ -400,7 +500,7 @@ function MessageRow({ message }: { message: MailMessage }) {
         <div className="snippet">{message.snippet || message.bodyText}</div>
       </div>
       <div className="row-meta">
-        <span className={classForCategory(message.sane.category)}>{message.sane.category}</span>
+        <span className={classForCategory(message.sane.category)}>{labelForCategory(message.sane.category)}</span>
         <span className="score">{Math.round(message.sane.todayScore)}</span>
       </div>
     </Link>
@@ -419,6 +519,7 @@ function MessageDetailRoute() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.message(messageId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.messages });
       void queryClient.invalidateQueries({ queryKey: queryKeys.today });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.home });
     },
   });
 
@@ -431,7 +532,7 @@ function MessageDetailRoute() {
     ["not-important", "Not important", ThumbsDown],
     ["junk", "Junk", ShieldAlert],
     ["not-junk", "Not junk", ThumbsUp],
-    ["needs-reply", "Needs reply", MessageSquare],
+    ["needs-reply", "Need attention", MessageSquare],
     ["done", "Done", Check],
   ];
 
@@ -445,7 +546,7 @@ function MessageDetailRoute() {
         <h1>{message.subject}</h1>
         <p>{senderName(message.from)} · {formatDate(message.date)}</p>
         <div className="toolbar">
-          <span className={classForCategory(message.sane.category)}>{message.sane.category}</span>
+          <span className={classForCategory(message.sane.category)}>{labelForCategory(message.sane.category)}</span>
           <span className="pill">score {Math.round(message.sane.todayScore)}</span>
         </div>
       </section>
@@ -504,6 +605,8 @@ function AiOpsRoute() {
 
   const latestRun = runMutation.data?.run || query.data.latestRun;
   const latestVerification = verifyMutation.data?.run || query.data.latestVerification;
+  const observability = query.data.observability ?? defaultObservability;
+  const prompts = query.data.prompts ?? [];
 
   return (
     <div className="page-grid">
@@ -539,6 +642,7 @@ function AiOpsRoute() {
           </div>
         </div>
         <div className="ops-grid">
+          <PhoenixSummary observability={observability} latestRun={latestRun} latestVerification={latestVerification} />
           <AiRunSummary run={latestRun} />
           <VerificationSummary run={latestVerification} />
         </div>
@@ -547,11 +651,11 @@ function AiOpsRoute() {
         <div className="section-header">
           <div>
             <h2>Active prompts</h2>
-            <p>{query.data.prompts.length} versioned prompts are pinned for this loop.</p>
+            <p>{prompts.length} versioned prompts are pinned for this loop.</p>
           </div>
         </div>
         <div className="prompt-stack">
-          {query.data.prompts.map((prompt) => (
+          {prompts.map((prompt) => (
             <div className="prompt-row" key={prompt.id}>
               <div>
                 <h3>{prompt.id}</h3>
@@ -588,6 +692,36 @@ function AiOpsRoute() {
   );
 }
 
+function PhoenixSummary({
+  observability,
+  latestRun,
+  latestVerification,
+}: {
+  observability: PhoenixObservabilityStatus;
+  latestRun: AiRun | null;
+  latestVerification: AiVerificationRun | null;
+}) {
+  const traceId = latestRun?.observability?.traceId || latestVerification?.observability?.traceId;
+  const status = !observability.enabled
+    ? "disabled"
+    : observability.available
+      ? "connected"
+      : "unavailable";
+
+  return (
+    <div className="ops-panel" data-testid="phoenix-status">
+      <Activity size={18} />
+      <strong>Phoenix {status}</strong>
+      <span>{observability.projectName} · {observability.privacy.sensitiveContent}</span>
+      {traceId && <span className="muted">trace {shortHash(traceId)}</span>}
+      <a className="button compact-button" href={observability.appUrl} target="_blank" rel="noreferrer">
+        <ExternalLink size={15} />
+        Open Phoenix
+      </a>
+    </div>
+  );
+}
+
 function AiRunSummary({ run }: { run: AiRun | null }) {
   if (!run) {
     return (
@@ -604,6 +738,7 @@ function AiRunSummary({ run }: { run: AiRun | null }) {
       <Activity size={18} />
       <strong>{run.status}</strong>
       <span>{run.metrics.messagesProcessed} messages · {run.metrics.latencyMs}ms</span>
+      <span className="muted">{run.provider.name} · {run.provider.model}</span>
       <span className="muted">confidence {formatPercent(run.metrics.averageConfidence)}</span>
     </div>
   );
@@ -751,7 +886,7 @@ function SettingsRoute() {
         <div className="stats-grid compact">
           <Stat icon={Mail} label="Synced" value={statusData.counts.messages} testId="settings-stat-synced" />
           <Stat icon={CheckCircle2} label="Today" value={statusData.counts.today} />
-          <Stat icon={MessageSquare} label="Need reply" value={statusData.counts.needsReply} />
+          <Stat icon={MessageSquare} label="Need attention" value={statusData.counts.needsReply} />
           <Stat icon={ShieldAlert} label="Junk review" value={statusData.counts.junkReview} />
         </div>
       </section>

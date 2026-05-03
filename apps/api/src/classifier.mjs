@@ -92,7 +92,7 @@ export function classifyMessage(message, account) {
 
   const reasons = [];
   if (direct) reasons.push("sent directly to you");
-  if (needsReply) reasons.push("looks like it may need a reply");
+  if (needsReply) reasons.push("looks like it may need your attention");
   if (isAutomated) reasons.push("looks automated or bulk");
   if (possibleJunk) reasons.push("contains junk or scam-like signals");
   if (recencyBoost) reasons.push("recent message");

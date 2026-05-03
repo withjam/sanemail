@@ -13,7 +13,7 @@ builds calmer views without changing the user's Gmail mailbox.
 - `All Mail` view with virtualized message list.
 - First-pass `Today` view.
 - Message rationale and feedback buttons.
-- AI Ops view with prompt versions, local run traces, and synthetic verification.
+- AI Ops view with prompt versions, local run traces, Phoenix status, and synthetic verification.
 - Local disconnect/delete flow.
 - PWA manifest, service worker, and persisted query cache.
 
@@ -63,10 +63,10 @@ http://localhost:5173
 The API runs at `http://localhost:3000`. The React PWA runs at
 `http://localhost:5173` in development.
 
-The seed command creates demo messages so the UI can be tested without Gmail
-credentials.
+The seed command creates a deterministic 200-message golden mailbox so the UI
+can be tested without Gmail credentials.
 
-Reset local data back to the deterministic demo mailbox:
+Reset local data back to the deterministic 200-message demo mailbox:
 
 ```sh
 bun run demo:reset
@@ -77,6 +77,21 @@ Run the local AI loop and synthetic verification suite:
 ```sh
 bun run ai:run
 bun run ai:verify
+```
+
+Use Ollama Cloud with DeepSeek V4 Pro:
+
+```sh
+ollama pull deepseek-v4-pro:cloud
+AI_PROVIDER=ollama OLLAMA_MODEL=deepseek-v4-pro:cloud OLLAMA_THINK=high bun run ai:run
+AI_PROVIDER=ollama OLLAMA_MODEL=deepseek-v4-pro:cloud OLLAMA_THINK=high bun run dev
+```
+
+Send local AI traces to Phoenix:
+
+```sh
+PHOENIX_ENABLED=true bun run ai:run
+PHOENIX_ENABLED=true bun run ai:verify
 ```
 
 Useful routes:
@@ -95,6 +110,13 @@ for more testing detail.
 See [docs/ai-control-plane.md](/Users/ruckus/workspace/sanemail/docs/ai-control-plane.md)
 for the current AI loop, prompt control, instrumentation, and verification
 contract.
+
+See [docs/gmail-ai-security.md](/Users/ruckus/workspace/sanemail/docs/gmail-ai-security.md)
+for the current Gmail AI security and model-provider policy.
+
+When using `bun run dev`, SaneMail enables local Phoenix tracing by default and
+exports to the `Sanemail` project at `http://localhost:6006`. Set
+`PHOENIX_ENABLED=false` to run without Phoenix.
 
 ## Gmail OAuth
 
@@ -163,8 +185,8 @@ DATA_DIR=/tmp/sanemail bun run dev
 To clear local app data from the UI, open Settings and choose
 `Disconnect and delete local data`. This does not change Gmail.
 
-To repopulate the local demo mailbox from the UI, open Settings and choose
-`Reset demo data`.
+To repopulate the local 200-message golden mailbox from the UI, open Settings
+and choose `Reset demo data`.
 
 ## Docker
 

@@ -54,7 +54,36 @@ test("stores accounts, messages, threads, and feedback in an isolated data dir",
   ]);
 
   await store.saveFeedback(`${account.id}:message:one`, "important");
+  await store.recordAiRun({
+    id: "airun_test",
+    kind: "mailbox-curation",
+    trigger: "test",
+    provider: { name: "mock-local", model: "deterministic-synthetic-v0", temperature: 0 },
+    input: { accountId: account.id },
+    output: {
+      briefing: {
+        text: "One message needs attention.",
+        generatedAt: new Date().toISOString(),
+        source: "ai-loop",
+        model: "deterministic-briefing-v0",
+        counts: {
+          visible: 1,
+          recent: 1,
+          last7Days: 1,
+          needsReply: 0,
+          needsReplyLast7: 0,
+          upcoming: 0,
+          informational: 0,
+          hidden: 0,
+          carriedOver: 0,
+        },
+        messageIds: [`${account.id}:message:one`],
+      },
+    },
+    metrics: { messagesProcessed: 1 },
+  });
   const snapshot = await store.readStore();
+  const briefing = store.latestInboxBriefing(snapshot, account.id);
 
   assert.equal(firstSync.inserted, 1);
   assert.equal(secondSync.updated, 1);
@@ -63,6 +92,9 @@ test("stores accounts, messages, threads, and feedback in an isolated data dir",
   assert.equal(snapshot.messages[0].subject, "Hello again");
   assert.equal(snapshot.threads.length, 1);
   assert.equal(snapshot.feedback[0].kind, "important");
+  assert.equal(snapshot.inboxBriefings.length, 1);
+  assert.equal(briefing.runId, "airun_test");
+  assert.equal(briefing.messageIds[0], `${account.id}:message:one`);
 
   await rm(dataDir, { recursive: true, force: true });
 });

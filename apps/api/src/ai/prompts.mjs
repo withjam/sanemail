@@ -65,6 +65,54 @@ const promptDefinitions = [
     userTemplate:
       "Category: {{category}}\nNeeds reply: {{needsReply}}\nPossible junk: {{possibleJunk}}\nDirect: {{direct}}\nAge hours: {{ageHours}}\nFeedback: {{feedback}}",
   },
+  {
+    id: "mail-briefing",
+    version: "2026-05-03.3",
+    stage: "briefing",
+    title: "Inbox state briefing",
+    description: "Summarize the status of my email inbox like you were my personal chief of staff",
+    provider: "mock-local",
+    model: "deterministic-briefing-v0",
+    temperature: 0,
+    variables: [
+      "recent",
+      "last7Days",
+      "needsReply",
+      "upcoming",
+      "carryOver",
+      "callouts",
+      "informational",
+      "hidden",
+      "context",
+    ],
+    responseSchema: {
+      text: "string",
+      narrative: {
+        status: "string",
+        needToKnow: "string",
+        mightBeMissing: "string",
+        needsAttention: "string",
+      },
+      callouts: [
+        {
+          kind: "attention | new_attention | carry_over",
+          label: "string",
+          title: "string",
+          body: "string",
+          messageId: "string",
+          messageIds: "string[]",
+          priority: "number",
+          deliveredAt: "string",
+        },
+      ],
+      counts: "object",
+      messageIds: "string[]",
+    },
+    system:
+      "Summarize the status of my email inbox like you were my friendly, personal chief of staff. ",
+    userTemplate:
+      "Let me know what requires my attention, what is likely upcoming, and remind me of anything I may be neglecting. Prefer recent messages to old messages, but take them into account to ensure I haven't forgotten anything important. Limit the specific callouts to 4 most recent or urgent. Give me a conversational summary, not a numeric regurgitation. Use this structured inbox context. Preserve messageId values exactly for linked callouts. Do not mention aggregate counts or system processing details.\n\nReturn JSON for the UI with this shape: {\"text\":\"brief conversational summary\",\"narrative\":{\"status\":\"main paragraph\",\"needToKnow\":\"optional supporting paragraph or empty string\",\"mightBeMissing\":\"optional reminder paragraph or empty string\",\"needsAttention\":\"optional attention paragraph or empty string\"},\"callouts\":[{\"kind\":\"attention|new_attention|carry_over\",\"label\":\"Need attention\",\"title\":\"email subject without trailing punctuation\",\"body\":\"one short human reason this item matters\",\"messageId\":\"source message id\",\"messageIds\":[\"source message id\"],\"priority\":1,\"deliveredAt\":\"ISO timestamp\"}],\"counts\":{},\"messageIds\":[\"source message id\"]}. Keep callouts to 4 or fewer and use linked message ids when calling out specific emails.\n\n{{context}}",
+  },
 ];
 
 function sortObject(value) {
@@ -128,6 +176,7 @@ export function renderPrompt(id, variables = {}) {
   const renderedUser = prompt.userTemplate.replace(/\{\{(\w+)\}\}/g, (_match, key) => {
     const value = variables[key];
     if (Array.isArray(value)) return value.join(", ");
+    if (value && typeof value === "object") return JSON.stringify(value, null, 2);
     if (value === null || value === undefined) return "";
     return String(value);
   });

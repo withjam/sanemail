@@ -99,12 +99,15 @@ async function postJson(origin, pathName, body, validate) {
 const dataDir = await mkdtemp(path.join(os.tmpdir(), "sanemail-smoke-"));
 const port = await getFreePort();
 const origin = `http://127.0.0.1:${port}`;
+const expectedDemoMessages = 200;
 const env = {
   ...process.env,
   DATA_DIR: dataDir,
   PORT: String(port),
   HOST: "127.0.0.1",
   APP_ORIGIN: origin,
+  AI_PROVIDER: "mock",
+  PHOENIX_ENABLED: "false",
 };
 
 let server;
@@ -119,8 +122,8 @@ try {
 
   await expectPage(origin, "/", ["<div id=\"root\"></div>", "/assets/"]);
   await expectJson(origin, "/api/status", (payload) => {
-    if (payload.counts.messages !== 12) {
-      throw new Error(`Expected 12 synced messages; got ${payload.counts.messages}`);
+    if (payload.counts.messages !== expectedDemoMessages) {
+      throw new Error(`Expected ${expectedDemoMessages} synced messages; got ${payload.counts.messages}`);
     }
   });
   await expectJson(origin, "/api/messages", (payload) => {
@@ -146,14 +149,28 @@ try {
       throw new Error("Today included the seeded scam-like message.");
     }
   });
+  await expectJson(origin, "/api/home", (payload) => {
+    if (!payload.briefing?.text) {
+      throw new Error("Home did not include a precomputed briefing.");
+    }
+    if (payload.tabs.mostRecent.some((message) => message.subject === "Verify your account immediately")) {
+      throw new Error("Home most-recent tab surfaced the seeded scam-like message.");
+    }
+    if (!payload.tabs.needsReply.some((message) => message.subject === "Can you review the lease renewal today?")) {
+      throw new Error("Home need-reply tab missed the seeded action item.");
+    }
+    if (!payload.tabs.upcoming.some((message) => message.subject === "Flight check-in opens tomorrow")) {
+      throw new Error("Home upcoming tab missed the seeded flight reminder.");
+    }
+  });
   await expectJson(origin, "/api/ai/control", (payload) => {
-    if (payload.prompts.length !== 3) {
-      throw new Error(`Expected 3 AI prompts; got ${payload.prompts.length}`);
+    if (payload.prompts.length !== 4) {
+      throw new Error(`Expected 4 AI prompts; got ${payload.prompts.length}`);
     }
   });
   await postJson(origin, "/api/ai/run", {}, (payload) => {
-    if (payload.run.metrics.messagesProcessed !== 12) {
-      throw new Error(`Expected 12 AI decisions; got ${payload.run.metrics.messagesProcessed}`);
+    if (payload.run.metrics.messagesProcessed !== expectedDemoMessages) {
+      throw new Error(`Expected ${expectedDemoMessages} AI decisions; got ${payload.run.metrics.messagesProcessed}`);
     }
   });
   await postJson(origin, "/api/ai/verify", {}, (payload) => {

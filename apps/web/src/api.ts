@@ -4,6 +4,7 @@ import type {
   AiVerificationResponse,
   FeedbackKind,
   DemoResetResponse,
+  HomeResponse,
   MessageResponse,
   MessagesResponse,
   StatusResponse,
@@ -35,6 +36,10 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function getStatus() {
   return apiFetch<StatusResponse>("/api/status");
+}
+
+export function getHome() {
+  return apiFetch<HomeResponse>("/api/home");
 }
 
 export function getMessages() {

@@ -77,6 +77,10 @@ not sit in the hot path for accepting mail.
 - Privacy controls: data residency, retention, export, deletion, audit log, and admin visibility.
 - Deliverability operations: queues, bounce policy, abuse controls, IP/domain reputation, and postmaster tooling.
 - Gmail OAuth app configuration, scope approval, data deletion flows, and restricted-scope compliance.
+- AI provider policy, consent boundaries, and Gmail-derived data transfer controls.
+
+See [Gmail AI Security And Model Provider Policy](/Users/ruckus/workspace/sanemail/docs/gmail-ai-security.md)
+for the current model-provider boundary.
 
 ## Data Plane
 

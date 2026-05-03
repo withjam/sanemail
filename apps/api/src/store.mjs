@@ -15,6 +15,7 @@ function emptyStore() {
     feedback: [],
     events: [],
     aiRuns: [],
+    inboxBriefings: [],
     verificationRuns: [],
   };
 }
@@ -168,6 +169,23 @@ export async function recordAiRun(run) {
       run,
       ...store.aiRuns.filter((item) => item.id !== run.id),
     ].slice(0, 100);
+
+    if (run.output?.briefing) {
+      const createdAt = new Date().toISOString();
+      store.inboxBriefings = [
+        {
+          id: `brief_${crypto.randomUUID()}`,
+          accountId: run.input?.accountId || null,
+          runId: run.id,
+          trigger: run.trigger,
+          provider: run.provider,
+          ...run.output.briefing,
+          createdAt,
+        },
+        ...(store.inboxBriefings || []).filter((item) => item.runId !== run.id),
+      ].slice(0, 50);
+    }
+
     store.events.push({
       type: "ai.run.completed",
       runId: run.id,
@@ -178,6 +196,16 @@ export async function recordAiRun(run) {
     });
     return run;
   });
+}
+
+export function latestInboxBriefing(store, accountId) {
+  return [...(store.inboxBriefings || [])]
+    .filter((briefing) => !accountId || !briefing.accountId || briefing.accountId === accountId)
+    .sort(
+      (a, b) =>
+        new Date(b.generatedAt || b.createdAt || 0).getTime() -
+        new Date(a.generatedAt || a.createdAt || 0).getTime(),
+    )[0] || null;
 }
 
 export async function listAiRuns(limit = 50) {
