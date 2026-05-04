@@ -94,6 +94,120 @@ The hash is included in every AI run and verification run. This gives us a
 stable join key when a ranking decision changes because prompt text, schema, or
 model settings changed.
 
+## Queue-Backed Classification Flow
+
+SaneMail should not use a pile of cron jobs for ingestion and classification.
+The production flow should use a durable queue, with jobs enqueued by source
+events and by completed work. Because the durable backend is already moving to
+Postgres, the default queue choice should be Postgres-backed, such as Graphile
+Worker or pg-boss. That keeps source cursors, classification backlog state, and
+job dedupe in one transactional system. BullMQ/Redis remains a reasonable later
+choice if queue throughput needs to scale independently from Postgres.
+
+The queue payloads must contain ids, cursors, versions, and reasons only. They
+must not contain raw email bodies, extracted body text, attachments, or full LLM
+prompt inputs.
+
+Current local development starts with a free `local-json` queue stored in
+`data/sanemail.json`. It is a compatibility scaffold, not the production queue.
+Run it with `bun run worker`, or set `QUEUE_WORKER_ENABLED=true` when running
+`bun run dev`.
+
+To use Postgres/Graphile Worker instead, set `QUEUE_DRIVER=graphile-worker` and
+configure `DATABASE_URL` or `POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_DB`/
+`POSTGRES_USER`/`POSTGRES_PASSWORD`. The same `bun run worker` command then uses
+Graphile Worker's Postgres queue.
+
+Core jobs:
+
+- `source.sync`: sync one source connection from the latest source cursor.
+- `classification.batch`: classify the newest pending/stale messages for one
+  user and classifier version.
+- `message-types.discover`: propose or update dynamic user message types from
+  repeated clusters and behavior signals.
+- `brief.generate`: generate or refresh an all-source or source-scoped brief
+  after classification has produced enough fresh state.
+
+Queue chaining:
+
+1. Gmail watch, fallback polling, manual sync, or backfill enqueues
+   `source.sync`.
+2. `source.sync` upserts canonical messages and source refs, updates the source
+   cursor, marks changed messages as `pending` or `stale`, and enqueues
+   `classification.batch` for the owning user.
+3. `classification.batch` claims a recent-first batch from
+   `message_classification_state`, runs the classification chain, persists
+   `message_classifications`, `message_type_assignments`, `message_features`,
+   and retry state, then enqueues `brief.generate`.
+4. If the batch creates enough candidate type evidence or feedback thresholds
+   changed, it enqueues `message-types.discover`.
+5. `brief.generate` reads classified state, debounces repeated requests per
+   user/scope, and writes a new brief.
+
+Concurrency rules:
+
+- `source.sync` should be serialized per `source_connection_id`.
+- `classification.batch` should be serialized per `(user_id, classifier_version)`
+  at first; later it can use small per-user concurrency if row claiming is
+  robust.
+- `brief.generate` should be debounced per `(user_id, scope_type,
+  source_connection_id)` so bursts of ingested mail do not create many brief
+  jobs.
+- Failed jobs use exponential retry with a dead-letter state after the retry
+  budget is exhausted.
+
+Classification batch selection:
+
+```sql
+select message_id
+from message_classification_state
+where user_id = $1
+  and classifier_version = $2
+  and state in ('pending', 'stale', 'failed')
+  and (next_attempt_at is null or next_attempt_at <= now())
+order by
+  case when state in ('pending', 'stale') then 0 else 1 end,
+  priority_at desc,
+  message_id desc
+limit $3
+for update skip locked;
+```
+
+This gives us recent-first behavior without cron. The presence of pending work is
+the scheduler.
+
+## Classification Chain
+
+The first production classification chain should be a single batch LLM call
+surrounded by deterministic pre/post-processing:
+
+1. Load active user taxonomy, source refs, existing feedback, and aggregate type
+   stats.
+2. Build compact per-message features from headers/source metadata/body excerpt:
+   sender domain, list id, source labels, directness, bulk/security/transactional
+   hints, action cues, deadlines, and entity keys.
+3. Render `mail-classification-batch` with messages newest-first, the taxonomy,
+   policy, and user signals.
+4. Validate the structured JSON response against the schema.
+5. Reconcile type assignments against the user's taxonomy. Unknown types become
+   candidate suggestions unless they exactly match an accepted type alias.
+6. Persist versioned classification output and current assignment rows.
+7. Enqueue brief generation and optional type discovery work.
+
+The model should return:
+
+- stable `systemCategory`
+- attention flags and score
+- compact reasons
+- extracted action/entity/deadline metadata
+- ranked user message-type assignments
+- candidate type suggestions with evidence
+
+The current prompt registry includes `mail-classification-batch` as the target
+prompt for this queue worker. The older per-message `mail-triage`, `mail-extract`,
+and `mail-rank` prompts remain useful for deterministic local verification and
+for fallback or eval slices.
+
 ## Instrumentation
 
 AI runs are stored in the local JSON store under `aiRuns`. Verification runs

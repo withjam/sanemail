@@ -77,7 +77,18 @@ Deliverables:
 
 - Replace local JSON store with Postgres.
 - Add schema migrations.
-- Add sync cursors and provider-account tables.
+- Add `source_connections` for multiple connected sources per user.
+- Add `message_source_refs` so canonical messages stay source-agnostic while
+  preserving provider ids, labels, folders, and source state.
+- Add per-source sync cursors for fast provider delta ingestion.
+- Add per-user classification cursors/backlog state for recent-first batch
+  classification after ingest.
+- Add user message type tables for dynamic personalized classification.
+- Add message type assignment and message feature tables for per-message
+  metadata.
+- Add behavior event and aggregate type-stat tables for personalization.
+- Add durable queue job contract for source sync, classification batches, type
+  discovery, and brief generation.
 - Add idempotent sync job contract.
 - Add delete/disconnect data flow.
 
@@ -128,6 +139,9 @@ Deliverables:
 - History-based partial sync.
 - Fallback polling.
 - Full resync recovery when Gmail history cursor expires.
+- Post-ingest event that marks new or changed messages for later classification
+  without blocking source sync.
+- Queue worker for `source.sync`, serialized per source connection.
 
 ## Milestone 5: Intelligence Layer
 
@@ -136,7 +150,15 @@ Status: pending.
 Deliverables:
 
 - Body cleaning and quoted reply trimming.
-- Classifier pipeline for human/bulk/junk/action-needed.
+- Batch classifier pipeline for human/bulk/junk/action-needed, ordered by newest
+  pending messages first and resumed through per-user classification cursors.
+- Queue worker for `classification.batch`, serialized per user/classifier
+  version with retry and dead-letter handling.
+- Seed user message type taxonomy and dynamic type assignment.
+- Type discovery worker that proposes personalized categories from repeated
+  sender/list/entity/semantic clusters.
+- User controls for renaming, merging, splitting, muting, and archiving message
+  types.
 - Embeddings for semantic search and clustering.
 - Thread summaries and action extraction.
 - Feedback capture for personalization.

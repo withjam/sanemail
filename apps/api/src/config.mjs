@@ -39,18 +39,41 @@ function thinkEnv(name, defaultValue = "high") {
   return normalized;
 }
 
+function buildDatabaseUrl() {
+  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
+
+  const host = process.env.POSTGRES_HOST || "";
+  if (!host) return "";
+
+  const user = encodeURIComponent(process.env.POSTGRES_USER || "postgres");
+  const password = encodeURIComponent(process.env.POSTGRES_PASSWORD || "");
+  const auth = password ? `${user}:${password}` : user;
+  const port = process.env.POSTGRES_PORT || "5432";
+  const database = encodeURIComponent(process.env.POSTGRES_DB || "sanemail");
+  return `postgres://${auth}@${host}:${port}/${database}`;
+}
+
 export function loadConfig() {
   loadDotEnv();
 
   const port = Number(process.env.PORT || 3000);
   const appOrigin = process.env.APP_ORIGIN || `http://localhost:${port}`;
   const webOrigin = process.env.WEB_ORIGIN || appOrigin;
+  const databaseUrl = buildDatabaseUrl();
 
   return {
     port,
     host: process.env.HOST || "127.0.0.1",
     appOrigin,
     webOrigin,
+    database: {
+      url: databaseUrl,
+      host: process.env.POSTGRES_HOST || "",
+      port: Number(process.env.POSTGRES_PORT || 5432),
+      database: process.env.POSTGRES_DB || "sanemail",
+      user: process.env.POSTGRES_USER || "postgres",
+      password: process.env.POSTGRES_PASSWORD || "",
+    },
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID || "",
       clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
@@ -63,12 +86,19 @@ export function loadConfig() {
       messageLimit: Number(process.env.SYNC_MESSAGE_LIMIT || 50),
       query: process.env.SYNC_QUERY || "newer_than:90d -in:chats",
     },
+    queue: {
+      driver: process.env.QUEUE_DRIVER || "local-json",
+      databaseUrl: process.env.QUEUE_DATABASE_URL || databaseUrl,
+      pollIntervalMs: Number(process.env.QUEUE_POLL_INTERVAL_MS || 1000),
+      classificationBatchSize: Number(process.env.CLASSIFICATION_BATCH_SIZE || 25),
+    },
     ai: {
       provider: String(process.env.AI_PROVIDER || "mock").trim().toLowerCase(),
       fallbackToMock: booleanEnv("AI_FALLBACK_TO_MOCK", true),
       timeoutMs: Number(process.env.AI_TIMEOUT_MS || 120_000),
       maxRetries: Number(process.env.AI_MAX_RETRIES || 2),
       runLimit: Number(process.env.AI_RUN_LIMIT || 12),
+      briefingMode: process.env.AI_BRIEFING_MODE || "auto",
       ollamaClassifyMessages: booleanEnv("AI_OLLAMA_CLASSIFY_MESSAGES", false),
     },
     ollama: {

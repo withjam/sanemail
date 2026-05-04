@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { loadConfig } from "../config.mjs";
-import { classifyMessage } from "../classifier.mjs";
+import { applyFeedbackToClassification, classifyMessage } from "../classifier.mjs";
 import { getPrimaryAccount, latestInboxBriefing, readStore, recordAiRun } from "../store.mjs";
 import { classifyWithOllama, generateBriefingWithOllama } from "./ollama.mjs";
 import { traceAiRun } from "./phoenix.mjs";
@@ -48,6 +48,11 @@ function ageHours(message) {
   const time = new Date(message.date || Number(message.internalDate) || 0).getTime();
   if (!Number.isFinite(time)) return 9999;
   return Math.max(0, (Date.now() - time) / 36e5);
+}
+
+function messageDeliveredAtMs(message) {
+  const time = new Date(message.date || Number(message.internalDate) || 0).getTime();
+  return Number.isFinite(time) ? time : 0;
 }
 
 function decisionAgeHours(decision) {
@@ -111,8 +116,30 @@ function embeddingSummary(text, dimensions = 16) {
   };
 }
 
-function feedbackForMessage(feedback, messageId) {
-  return feedback.filter((entry) => entry.messageId === messageId).map((entry) => entry.kind);
+const addressedFeedbackKinds = new Set(["done", "not-important", "junk"]);
+
+function feedbackEntriesForMessage(feedback, messageId) {
+  return feedback.filter((entry) => entry.messageId === messageId);
+}
+
+function latestFeedbackEntry(feedbackEntries = []) {
+  return [...feedbackEntries].sort(
+    (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime(),
+  )[0] || null;
+}
+
+function feedbackState(feedbackEntries = []) {
+  const latest = latestFeedbackEntry(feedbackEntries);
+  return {
+    kinds: feedbackEntries.map((entry) => entry.kind),
+    latestKind: latest?.kind || null,
+    latestAt: latest?.createdAt || null,
+    addressed: latest ? addressedFeedbackKinds.has(latest.kind) : false,
+  };
+}
+
+function isDecisionAddressed(decision) {
+  return Boolean(decision.feedback?.addressed);
 }
 
 function feedbackBoost(kinds) {
@@ -165,15 +192,23 @@ function rankDecision(classification, actions, deadlines, messageAgeHours, feedb
   return {
     recsysScore: Math.round(clamp(score, 0, 100)),
     rankingReasons: reasons,
-    suppressFromToday: classification.possibleJunk || classification.automated,
+    suppressFromToday:
+      Boolean(classification.feedbackState?.addressed) ||
+      classification.possibleJunk ||
+      classification.automated,
   };
 }
 
 function decisionForMessage(message, account, feedback) {
   const text = textForMessage(message);
   const messageAgeHours = Number(ageHours(message).toFixed(2));
-  const feedbackKinds = feedbackForMessage(feedback, message.id);
-  const classification = classifyMessage(message, account);
+  const feedbackEntries = feedbackEntriesForMessage(feedback, message.id);
+  const messageFeedback = feedbackState(feedbackEntries);
+  const classification = applyFeedbackToClassification(
+    classifyMessage(message, account),
+    feedbackEntries,
+  );
+  const feedbackKinds = messageFeedback.kinds;
   const actions = extractActions(text);
   const deadlines = extractDeadlines(text);
   const entities = extractEntities(message);
@@ -211,6 +246,7 @@ function decisionForMessage(message, account, feedback) {
     possibleJunk: classification.possibleJunk,
     automated: classification.automated,
     direct: classification.direct,
+    addressed: messageFeedback.addressed,
     confidence: confidenceFor(classification, actions, deadlines),
     recsysScore: rank.recsysScore,
     suppressFromToday: rank.suppressFromToday,
@@ -227,6 +263,7 @@ function decisionForMessage(message, account, feedback) {
       entities,
       replyCue: classification.needsReply ? "reply-likely" : null,
     },
+    feedback: messageFeedback,
     embedding: embeddingSummary(text),
     instrumentation: {
       inputHash: hashValue({
@@ -321,6 +358,123 @@ function idsFromPreviousBriefing(previousBriefing) {
   ].filter(Boolean));
 }
 
+function previousBriefingTimestamp(previousBriefing) {
+  const value = previousBriefing?.generatedAt || previousBriefing?.createdAt || null;
+  if (!value) return { iso: null, ms: 0 };
+  const ms = new Date(value).getTime();
+  return {
+    iso: value,
+    ms: Number.isFinite(ms) ? ms : 0,
+  };
+}
+
+function normalizedBriefingMode(mode, previousBriefing) {
+  const normalized = String(mode || "auto").trim().toLowerCase().replaceAll("_", "-");
+  if (["cold", "cold-start", "batch", "full", "full-refresh"].includes(normalized)) {
+    return "cold_start";
+  }
+  if (["iterative", "incremental", "since-last", "since-last-brief"].includes(normalized)) {
+    return previousBriefing ? "iterative" : "cold_start";
+  }
+  return previousBriefing ? "iterative" : "cold_start";
+}
+
+function uniqueMessages(messages) {
+  const seen = new Set();
+  const unique = [];
+  for (const message of messages) {
+    if (!message?.id || seen.has(message.id)) continue;
+    seen.add(message.id);
+    unique.push(message);
+  }
+  return unique;
+}
+
+function feedbackByMessageId(feedback = []) {
+  const byId = new Map();
+  for (const entry of feedback) {
+    if (!byId.has(entry.messageId)) byId.set(entry.messageId, []);
+    byId.get(entry.messageId).push(entry);
+  }
+  return byId;
+}
+
+export function selectMessagesForBriefing({
+  messages = [],
+  feedback = [],
+  previousBriefing = null,
+  mode = "auto",
+  limit,
+} = {}) {
+  const sorted = [...messages].sort((a, b) => messageDeliveredAtMs(b) - messageDeliveredAtMs(a));
+  const flow = normalizedBriefingMode(mode, previousBriefing);
+  const previous = previousBriefingTimestamp(previousBriefing);
+  const previousIds = idsFromPreviousBriefing(previousBriefing);
+  const feedbackMap = feedbackByMessageId(feedback);
+  const resolvedPreviousMessageIds = [];
+  const unresolvedPreviousMessageIds = [];
+
+  for (const messageId of previousIds) {
+    const state = feedbackState(feedbackMap.get(messageId) || []);
+    if (state.addressed) resolvedPreviousMessageIds.push(messageId);
+    else unresolvedPreviousMessageIds.push(messageId);
+  }
+
+  if (flow === "cold_start") {
+    const selected = sorted.slice(0, limit || undefined);
+    return {
+      mode: flow,
+      selected,
+      newMessages: selected,
+      carryOverMessages: [],
+      since: null,
+      previousBriefingId: null,
+      previousGeneratedAt: null,
+      resolvedPreviousMessageIds: [],
+      unresolvedPreviousMessageIds: [],
+    };
+  }
+
+  const newMessages = sorted.filter((message) => messageDeliveredAtMs(message) > previous.ms);
+  const carryOverMessages = sorted.filter(
+    (message) =>
+      unresolvedPreviousMessageIds.includes(message.id) &&
+      !newMessages.some((newMessage) => newMessage.id === message.id),
+  );
+  const carryOverCount = carryOverMessages.length;
+  const newLimit = limit ? Math.max(0, limit - carryOverCount) : undefined;
+  const selected = uniqueMessages([
+    ...newMessages.slice(0, newLimit === undefined ? undefined : newLimit),
+    ...carryOverMessages,
+  ]).slice(0, limit || undefined);
+
+  return {
+    mode: flow,
+    selected,
+    newMessages: newMessages.filter((message) => selected.some((item) => item.id === message.id)),
+    carryOverMessages: carryOverMessages.filter((message) => selected.some((item) => item.id === message.id)),
+    since: previous.iso,
+    previousBriefingId: previousBriefing?.id || null,
+    previousGeneratedAt: previous.iso,
+    resolvedPreviousMessageIds,
+    unresolvedPreviousMessageIds,
+  };
+}
+
+function memoryFromSelection(selection, decisions) {
+  return {
+    mode: selection.mode,
+    since: selection.since,
+    previousBriefingId: selection.previousBriefingId,
+    previousGeneratedAt: selection.previousGeneratedAt,
+    includedMessageIds: decisions.map((decision) => decision.messageId),
+    newMessageIds: selection.newMessages.map((message) => message.id),
+    carryOverMessageIds: selection.carryOverMessages.map((message) => message.id),
+    unresolvedPreviousMessageIds: selection.unresolvedPreviousMessageIds,
+    resolvedPreviousMessageIds: selection.resolvedPreviousMessageIds,
+  };
+}
+
 function stillRelevantFromPrevious(previousBriefing, decisions, limit = 2) {
   const previousIds = idsFromPreviousBriefing(previousBriefing);
   if (!previousIds.size) return [];
@@ -330,6 +484,7 @@ function stillRelevantFromPrevious(previousBriefing, decisions, limit = 2) {
       (decision) =>
         previousIds.has(decision.messageId) &&
         !decision.possibleJunk &&
+        !isDecisionAddressed(decision) &&
         (decision.needsReply ||
           decision.extracted.deadlines.length > 0 ||
           decision.extracted.actions.some((action) =>
@@ -417,10 +572,14 @@ function buildBriefingNarrative({
   };
 }
 
-function buildBriefingState(decisions = [], previousBriefing = null) {
-  const visible = decisions.filter((decision) => !decision.possibleJunk);
+function buildBriefingState(decisions = [], previousBriefing = null, memory = null) {
+  const visible = decisions.filter((decision) => !decision.possibleJunk && !isDecisionAddressed(decision));
   const needsReply = decisions.filter(
-    (decision) => decision.needsReply && !decision.possibleJunk && !decision.suppressFromToday,
+    (decision) =>
+      decision.needsReply &&
+      !decision.possibleJunk &&
+      !decision.suppressFromToday &&
+      !isDecisionAddressed(decision),
   );
   const recent = visible.filter((decision) => decisionAgeHours(decision) <= 24);
   const last7Days = visible.filter((decision) => decisionAgeHours(decision) <= 168);
@@ -435,6 +594,7 @@ function buildBriefingState(decisions = [], previousBriefing = null) {
   );
   const automated = decisions.filter((decision) => decision.automated && !decision.possibleJunk);
   const hidden = decisions.filter((decision) => decision.possibleJunk);
+  const addressed = decisions.filter(isDecisionAddressed);
   const carryOver = stillRelevantFromPrevious(previousBriefing, decisions);
   const replySubjects = summarizeSubjects(needsReplyLast7, () => true, 3);
   const upcomingSubjects = summarizeSubjects(upcoming, () => true, 2);
@@ -454,6 +614,7 @@ function buildBriefingState(decisions = [], previousBriefing = null) {
     upcoming,
     automated,
     hidden,
+    addressed,
     carryOver,
     replySubjects,
     upcomingSubjects,
@@ -461,6 +622,7 @@ function buildBriefingState(decisions = [], previousBriefing = null) {
     carryOverSubjects,
     callouts,
     narrative,
+    memory,
   };
 }
 
@@ -476,6 +638,7 @@ function decisionBriefingItem(decision) {
     needsAttention: Boolean(decision.needsReply),
     possibleJunk: Boolean(decision.possibleJunk),
     automated: Boolean(decision.automated),
+    addressed: Boolean(decision.feedback?.addressed),
     actions: decision.extracted?.actions || [],
     deadlines: decision.extracted?.deadlines || [],
     entities: decision.extracted?.entities || [],
@@ -490,6 +653,20 @@ function briefingContextFromState(state, previousBriefing = null) {
       "Use this as private context for deciding what matters. The user should only see the conversational summary and linked callouts.",
     recencyPolicy:
       "Prefer recent messages, include items from the past 7 days when still relevant, and use prior briefing items only to avoid neglecting important reminders.",
+    briefingMemory: {
+      mode: state.memory?.mode || (previousBriefing ? "iterative" : "cold_start"),
+      since: state.memory?.since || null,
+      previousBriefingId: state.memory?.previousBriefingId || previousBriefing?.id || null,
+      previousGeneratedAt:
+        state.memory?.previousGeneratedAt ||
+        previousBriefing?.generatedAt ||
+        previousBriefing?.createdAt ||
+        null,
+      includedMessageIds: state.memory?.includedMessageIds || [],
+      newMessageIds: state.memory?.newMessageIds || [],
+      unresolvedPreviousMessageIds: state.memory?.unresolvedPreviousMessageIds || [],
+      resolvedPreviousMessageIds: state.memory?.resolvedPreviousMessageIds || [],
+    },
     candidateCallouts: state.callouts.map((callout) => ({
       kind: callout.kind,
       label: callout.label,
@@ -513,31 +690,18 @@ function briefingContextFromState(state, previousBriefing = null) {
           generatedAt: previousBriefing.generatedAt || previousBriefing.createdAt || null,
           text: previousBriefing.text || "",
           messageIds: previousBriefing.messageIds || [],
+          callouts: (previousBriefing.callouts || []).map((callout) => ({
+            title: callout.title,
+            messageId: callout.messageId,
+            messageIds: callout.messageIds || [],
+          })),
           carryOverMessageIds: previousBriefing.carryOver?.messageIds || [],
         }
       : null,
   };
 }
 
-function renderBriefingPromptFromState(state) {
-  const context = briefingContextFromState(state);
-  return renderPrompt("mail-briefing", {
-    recent: state.recentSubjects,
-    last7Days: state.last7Days.length,
-    needsReply: state.replySubjects,
-    upcoming: state.upcomingSubjects,
-    carryOver: state.carryOverSubjects,
-    callouts: state.callouts.map(
-      (callout) => `${callout.label}: ${callout.title} [messageId=${callout.messageId}] ${callout.body}`,
-    ),
-    informational: state.automated.map((decision) => decision.subject).slice(0, 3),
-    hidden: state.hidden.map((decision) => decision.subject).slice(0, 3),
-    context,
-  });
-}
-
-function renderBriefingPromptForDecisions(decisions = [], previousBriefing = null) {
-  const state = buildBriefingState(decisions, previousBriefing);
+function renderBriefingPromptFromState(state, previousBriefing = null) {
   const context = briefingContextFromState(state, previousBriefing);
   return renderPrompt("mail-briefing", {
     recent: state.recentSubjects,
@@ -554,8 +718,26 @@ function renderBriefingPromptForDecisions(decisions = [], previousBriefing = nul
   });
 }
 
-export function buildInboxBriefing(decisions = [], { previousBriefing = null } = {}) {
-  const state = buildBriefingState(decisions, previousBriefing);
+function renderBriefingPromptForDecisions(decisions = [], previousBriefing = null, memory = null) {
+  const state = buildBriefingState(decisions, previousBriefing, memory);
+  const context = briefingContextFromState(state, previousBriefing);
+  return renderPrompt("mail-briefing", {
+    recent: state.recentSubjects,
+    last7Days: state.last7Days.length,
+    needsReply: state.replySubjects,
+    upcoming: state.upcomingSubjects,
+    carryOver: state.carryOverSubjects,
+    callouts: state.callouts.map(
+      (callout) => `${callout.label}: ${callout.title} [messageId=${callout.messageId}] ${callout.body}`,
+    ),
+    informational: state.automated.map((decision) => decision.subject).slice(0, 3),
+    hidden: state.hidden.map((decision) => decision.subject).slice(0, 3),
+    context,
+  });
+}
+
+export function buildInboxBriefing(decisions = [], { previousBriefing = null, memory = null } = {}) {
+  const state = buildBriefingState(decisions, previousBriefing, memory);
   const {
     visible,
     needsReply,
@@ -565,6 +747,7 @@ export function buildInboxBriefing(decisions = [], { previousBriefing = null } =
     upcoming,
     automated,
     hidden,
+    addressed,
     carryOver,
     carryOverSubjects,
     callouts,
@@ -572,7 +755,9 @@ export function buildInboxBriefing(decisions = [], { previousBriefing = null } =
   } = state;
 
   let text;
-  if (!decisions.length) {
+  if (!decisions.length && memory?.mode === "iterative") {
+    text = "No new mail needs your attention since the last briefing.";
+  } else if (!decisions.length) {
     text = "There is no local mail to summarize yet. Connect Gmail or reset the demo mailbox to generate a briefing.";
   } else if (visible.length === 0) {
     text = "Nothing needs your attention right now. The latest mail is either informational or being kept out of the main view.";
@@ -584,13 +769,30 @@ export function buildInboxBriefing(decisions = [], { previousBriefing = null } =
       narrative.needsAttention,
     ].filter(Boolean).join(" ");
   }
-  const prompt = renderBriefingPromptFromState(state);
+  const prompt = renderBriefingPromptFromState(state, previousBriefing);
+  const generatedAt = new Date().toISOString();
+  const memoryBlock = {
+    mode: memory?.mode || (previousBriefing ? "iterative" : "cold_start"),
+    producedAt: generatedAt,
+    since: memory?.since || null,
+    previousBriefingId: memory?.previousBriefingId || previousBriefing?.id || null,
+    previousGeneratedAt:
+      memory?.previousGeneratedAt ||
+      previousBriefing?.generatedAt ||
+      previousBriefing?.createdAt ||
+      null,
+    includedMessageIds: memory?.includedMessageIds || decisions.map((decision) => decision.messageId),
+    newMessageIds: memory?.newMessageIds || [],
+    carryOverMessageIds: carryOver.map((decision) => decision.messageId),
+    unresolvedPreviousMessageIds: memory?.unresolvedPreviousMessageIds || [],
+    resolvedPreviousMessageIds: memory?.resolvedPreviousMessageIds || [],
+  };
 
   return {
     text,
     narrative,
     callouts,
-    generatedAt: new Date().toISOString(),
+    generatedAt,
     source: "ai-loop",
     model: "deterministic-briefing-v0",
     prompt: {
@@ -610,6 +812,7 @@ export function buildInboxBriefing(decisions = [], { previousBriefing = null } =
       carriedOver: carryOver.length,
     },
     messageIds: idsFor(visible, 8),
+    memory: memoryBlock,
     carryOver: {
       previousBriefingId: previousBriefing?.id || null,
       previousGeneratedAt: previousBriefing?.generatedAt || null,
@@ -619,7 +822,7 @@ export function buildInboxBriefing(decisions = [], { previousBriefing = null } =
   };
 }
 
-function refreshRunOutput(run, decisions, previousBriefing = null) {
+function refreshRunOutput(run, decisions, previousBriefing = null, memory = null) {
   const curated = rankDecisions(decisions);
   const tokenCount = decisions.reduce(
     (sum, decision) => sum + decision.instrumentation.estimatedPromptTokens,
@@ -630,7 +833,7 @@ function refreshRunOutput(run, decisions, previousBriefing = null) {
     decisions,
     curatedMessageIds: curated.map((decision) => decision.messageId),
     topTodayMessageIds: curated.slice(0, 8).map((decision) => decision.messageId),
-    briefing: buildInboxBriefing(decisions, { previousBriefing }),
+    briefing: buildInboxBriefing(decisions, { previousBriefing, memory }),
   };
   run.metrics = {
     ...run.metrics,
@@ -656,6 +859,8 @@ export function runAiLoopOnMessages({
   limit,
   trigger = "manual",
   previousBriefing = null,
+  briefingSelection = null,
+  memory = null,
 } = {}) {
   const startedAt = nowIso();
   const runStart = Date.now();
@@ -675,6 +880,8 @@ export function runAiLoopOnMessages({
   const modelStart = Date.now();
   const decisions = scopedMessages.map((message) => decisionForMessage(message, account || {}, feedback));
   spans.push(createSpan("model.mock_inference", modelStart, { decisionCount: decisions.length }));
+  const briefingMemory =
+    memory || (briefingSelection ? memoryFromSelection(briefingSelection, decisions) : null);
 
   const rankStart = Date.now();
   const curated = rankDecisions(decisions);
@@ -702,6 +909,17 @@ export function runAiLoopOnMessages({
       accountId: account?.id || null,
       messageCount: scopedMessages.length,
       corpusHash: hashValue(scopedMessages.map((message) => message.id)),
+      briefingFlow: briefingMemory?.mode || (previousBriefing ? "iterative" : "cold_start"),
+      messageSelection: briefingMemory
+        ? {
+            mode: briefingMemory.mode,
+            since: briefingMemory.since,
+            includedMessageIds: briefingMemory.includedMessageIds,
+            newMessageIds: briefingMemory.newMessageIds,
+            carryOverMessageIds: briefingMemory.carryOverMessageIds,
+            resolvedPreviousMessageIds: briefingMemory.resolvedPreviousMessageIds,
+          }
+        : null,
       previousBriefing: previousBriefing
         ? {
             id: previousBriefing.id || null,
@@ -722,7 +940,7 @@ export function runAiLoopOnMessages({
       decisions,
       curatedMessageIds: curated.map((decision) => decision.messageId),
       topTodayMessageIds: curated.slice(0, 8).map((decision) => decision.messageId),
-      briefing: buildInboxBriefing(decisions, { previousBriefing }),
+      briefing: buildInboxBriefing(decisions, { previousBriefing, memory: briefingMemory }),
     },
     metrics: {
       latencyMs,
@@ -746,7 +964,7 @@ export function runAiLoopOnMessages({
   };
 }
 
-async function applyOllamaProvider(run, scopedMessages, config, previousBriefing = null) {
+async function applyOllamaProvider(run, scopedMessages, config, previousBriefing = null, memory = null) {
   const started = Date.now();
   const fallbackById = new Map(run.output.decisions.map((decision) => [decision.messageId, decision]));
   const decisions = [];
@@ -770,6 +988,8 @@ async function applyOllamaProvider(run, scopedMessages, config, previousBriefing
     timeoutMs: config.ai.timeoutMs,
     maxRetries: config.ai.maxRetries,
     classifyMessages,
+    briefingFlow: memory?.mode || (previousBriefing ? "iterative" : "cold_start"),
+    since: memory?.since || null,
     apiKey: config.ollama.apiKey ? "set (redacted)" : "unset",
   });
 
@@ -824,13 +1044,13 @@ async function applyOllamaProvider(run, scopedMessages, config, previousBriefing
     }
   }
 
-  refreshRunOutput(run, decisions, previousBriefing);
+  refreshRunOutput(run, decisions, previousBriefing, memory);
   const classificationErrorCount = errors.length;
   let briefingUsedOllama = false;
   if (decisions.length) {
     const briefingStart = Date.now();
     try {
-      const briefingPrompt = renderBriefingPromptForDecisions(decisions, previousBriefing);
+      const briefingPrompt = renderBriefingPromptForDecisions(decisions, previousBriefing, memory);
       aiDebugLog("ollama briefing context", {
         promptId: briefingPrompt.id,
         promptVersion: briefingPrompt.version,
@@ -921,21 +1141,36 @@ async function applyOllamaProvider(run, scopedMessages, config, previousBriefing
   return run;
 }
 
-export async function runAiLoop({ limit, trigger = "manual" } = {}) {
+export async function runAiLoop({ limit, trigger = "manual", mode } = {}) {
   const config = loadConfig();
   const store = await readStore();
   const account = (await getPrimaryAccount()) || store.accounts[0] || null;
   const effectiveLimit =
     limit === undefined && config.ai.provider === "ollama" ? config.ai.runLimit : limit;
-  const messages = [...(store.messages || [])]
+  const allMessages = [...(store.messages || [])]
     .filter((message) => !account?.id || message.accountId === account.id)
-    .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime())
-    .slice(0, effectiveLimit || undefined);
+    .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+  const previousBriefing = latestInboxBriefing(store, account?.id);
+  const selection = selectMessagesForBriefing({
+    messages: allMessages,
+    feedback: store.feedback,
+    previousBriefing,
+    mode: mode || config.ai.briefingMode,
+    limit: effectiveLimit,
+  });
+  const messages = selection.selected;
+  const contextBriefing = selection.mode === "iterative" ? previousBriefing : null;
   aiDebugLog("provider decision", {
     requestedProvider: config.ai.provider,
     willCallOllama: config.ai.provider === "ollama",
     effectiveLimit,
+    briefingFlow: selection.mode,
+    since: selection.since,
+    allMessages: allMessages.length,
     selectedMessages: messages.length,
+    newMessages: selection.newMessages.length,
+    carryOverMessages: selection.carryOverMessages.length,
+    resolvedPreviousMessages: selection.resolvedPreviousMessageIds.length,
     fallbackToMock: config.ai.fallbackToMock,
     ollama: {
       host: config.ollama.host,
@@ -945,16 +1180,16 @@ export async function runAiLoop({ limit, trigger = "manual" } = {}) {
       apiKey: config.ollama.apiKey ? "set (redacted)" : "unset",
     },
   });
-  const previousBriefing = latestInboxBriefing(store, account?.id);
   const run = runAiLoopOnMessages({
     account,
     messages,
     feedback: store.feedback,
     trigger,
-    previousBriefing,
+    previousBriefing: contextBriefing,
+    briefingSelection: selection,
   });
   if (config.ai.provider === "ollama") {
-    await applyOllamaProvider(run, messages, config, previousBriefing);
+    await applyOllamaProvider(run, messages, config, contextBriefing, run.output.briefing?.memory);
   } else {
     run.provider.requestedProvider = config.ai.provider;
   }

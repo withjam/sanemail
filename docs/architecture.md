@@ -88,9 +88,20 @@ The data plane receives, authenticates, stores, enriches, indexes, and serves ma
 It is optimized for near-real-time processing while never losing the original
 message.
 
-### 1. Gmail Connector And MX Edge
+### 1. Source Connectors And Fast Ingestion
 
-For the MVP, Gmail is the first ingestion source.
+For the MVP, Gmail is the first ingestion source. The connector boundary should
+still be generic enough for many source connections per user.
+
+Fast ingestion responsibility:
+
+- Sync SaneMail storage with each connected source.
+- Preserve enough source metadata to reconcile later and deep-link back.
+- Avoid LLM classification, summarization, embeddings, and brief generation in
+  the ingest transaction.
+- Commit source cursors only after canonical messages and source refs are
+  durably written.
+- Emit downstream work events for classification and briefing after ingest.
 
 Gmail connector responsibilities:
 
@@ -98,7 +109,8 @@ Gmail connector responsibilities:
 - Run initial sync over a bounded recent window.
 - Run partial sync from Gmail history IDs.
 - Use Gmail push notifications with periodic fallback sync.
-- Preserve Gmail ids, thread ids, labels, internal dates, and history cursor.
+- Preserve Gmail ids, thread ids, labels, internal dates, and history cursor in
+  source refs and sync cursors.
 - Treat Gmail labels and mailbox state as source signals only.
 - Avoid Gmail mutations in the MVP; `gmail.readonly` should be the target scope.
 
@@ -117,6 +129,11 @@ Output:
 - Connection metadata: IP, PTR, HELO/EHLO, TLS, ASN, geo, reputation hints.
 - Authentication metadata from SPF, DKIM, DMARC, ARC, and MTA-STS/TLS observations.
 
+For API-backed sources such as Gmail, output is the provider payload or selected
+raw/full message representation plus provider metadata. Downstream product
+surfaces consume canonical `messages` plus `message_source_refs`, not
+provider-specific records directly.
+
 ### 2. Immutable Mail Log
 
 The first durable write is the source of truth.
@@ -129,10 +146,25 @@ The first durable write is the source of truth.
 - For Gmail-ingested messages, store provider ids and raw/source payload metadata
   so Gmail state can be reconciled without treating SaneMail as the mailbox owner.
 
+Canonical message storage must support multiple source connections per user:
+
+- `source_connections`: one row per connected Gmail, Outlook, IMAP, or hosted MX
+  source.
+- `source_sync_cursors`: provider-specific cursor state, such as Gmail
+  `historyId`.
+- `messages`: source-agnostic SaneMail message metadata.
+- `message_source_refs`: provider ids, labels, folders, source state, and
+  deep-link metadata.
+
+See [Data Model](/Users/ruckus/workspace/sanemail/docs/data-model.md) for the
+ingestion schema, indexes, and classification cursor contract.
+
 ### 3. Security And Trust Pipeline
 
-This pipeline produces a risk verdict and evidence bundle. It should run before
-expensive LLM work and before the message appears in primary views.
+This pipeline produces a risk verdict and evidence bundle after durable ingest.
+It should run before expensive LLM work and before the message appears in primary
+views. Ingestion can record cheap source signals, but trust scoring should not
+block source sync unless the payload is malformed or unsafe to store.
 
 Signals:
 
@@ -158,6 +190,12 @@ or sender authentication failure.
 
 This is where LLMs and embedding models create the semantic layer.
 
+This pipeline is asynchronous and batch-oriented. It should prefer recent
+messages first, then continue older backfill using a per-user classification
+cursor. The ingest path marks messages as `pending` or `stale`; workers select
+batches by user, classifier version, state, retry time, and descending
+`received_at`.
+
 Derived artifacts:
 
 - Clean text extraction from MIME, HTML, attachments, calendar invites, and quoted replies.
@@ -166,14 +204,34 @@ Derived artifacts:
 - Message summary and thread summary.
 - Action classification: reply, approve, pay, schedule, read, archive, unsubscribe, ignore.
 - Deadline and urgency estimate with calibrated confidence.
+- System placement: `Needs Reply`, `FYI`, `Junk Review`, `All Mail`, and
+  candidate inclusion in `Today`.
+- User message types: dynamic personalized labels such as receipts, newsletters,
+  school logistics, package updates, bills, travel, security alerts, and
+  user-created types.
 - User-intent labels: personal, work, family, finance, legal, shopping, travel, product, social, system.
 - Embeddings for messages, threads, senders, entities, and user interactions.
+
+Dynamic classification model:
+
+- Start with global seed types for cold start.
+- Learn user-specific message types from source labels, sender/list patterns,
+  semantic clusters, extracted entities, and behavior.
+- Keep system placement separate from message type assignment so a message can be
+  both `Needs Reply` and `School Logistics`, or both `FYI` and `Receipts`.
+- Version the user's taxonomy and store the taxonomy version on every
+  classification result.
+- Let users rename, merge, split, mute, archive, or pin message types without
+  mutating original mail or source labels.
+- Use candidate types internally before promoting them to visible UI categories.
 
 Latency targets:
 
 - `P50 < 2s`: accepted message is visible in All Mail with basic metadata.
-- `P50 < 5s`: trust verdict, thread placement, and first-pass category.
-- `P50 < 15s`: summary, action guess, ranking features, and curated-view placement.
+- `P50 < 5s`: source refs, sync cursor, and safe display metadata committed for
+  recent deltas.
+- `P50 < 15s`: trust verdict, thread placement, and first-pass category for the
+  recent classification batch.
 - Expensive attachment or long-thread analysis can continue asynchronously.
 
 ### 5. Recommendation And Ranking Layer
@@ -191,6 +249,9 @@ Candidate generation:
 Ranking features:
 
 - Trust/risk verdict.
+- User message type and type-specific preference weights.
+- Type engagement stats: opens, replies, brief clicks, hides, rescues, and
+  unsubscribe behavior.
 - Relationship strength and recency.
 - Directness: To vs Cc vs list/bulk.
 - Action likelihood and expected effort.
@@ -211,6 +272,9 @@ Learning loop:
 
 - Capture explicit feedback: pin, hide, not junk, mark important, explain wrong, unsubscribe.
 - Capture implicit feedback carefully: open, reply, archive, delay, search, rescue from junk.
+- Maintain per-user message type stats and positive/negative examples.
+- Propose new message types from repeated clusters and behavior, then let users
+  accept, rename, merge, split, mute, or archive them.
 - Train per-user preference models for ranking and thresholds.
 - Keep global models for cold start, abuse detection, and baseline category quality.
 - Use contextual-bandit style exploration only in low-risk presentation choices; never
@@ -244,7 +308,7 @@ Expose a product API for the new experience and maintain compatibility surfaces.
 sequenceDiagram
     participant Source as Gmail Connector / MX Edge
     participant Raw as Raw Store
-    participant Bus as Event Bus
+    participant Queue as Durable Queue
     participant Trust as Security Pipeline
     participant AI as Understanding Pipeline
     participant Rank as Ranking Service
@@ -252,16 +316,22 @@ sequenceDiagram
     participant App as Web/Mobile
 
     Source->>Raw: persist raw/source payload
-    Source->>Bus: message.accepted
-    Bus->>Trust: authenticate and score risk
+    Source->>Queue: enqueue classification.batch
+    Queue->>Trust: authenticate and score risk
     Trust->>View: visible in All Mail
-    Trust->>Bus: message.trust_scored
-    Bus->>AI: summarize, extract, embed
-    AI->>Bus: message.enriched
-    Bus->>Rank: score views
+    Trust->>Queue: enqueue understanding batch
+    Queue->>AI: classify, type, summarize, extract, embed
+    AI->>Queue: enqueue ranking and brief refresh
+    Queue->>Rank: score views
     Rank->>View: update curated views
     View-->>App: push delta
 ```
+
+The queue is the scheduler. Source sync jobs, classification batches, type
+discovery, and brief generation should be enqueued from events and completed
+jobs rather than from many independent cron jobs. Periodic fallback polling can
+exist as a single safety net for source connectors, but normal work should flow
+from queue state and pending database rows.
 
 ## Failure Modes And Defaults
 

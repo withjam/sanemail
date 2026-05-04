@@ -29,6 +29,15 @@ const processes = [
   }),
 ];
 
+if (["1", "true", "yes", "on"].includes(String(process.env.QUEUE_WORKER_ENABLED || "").toLowerCase())) {
+  processes.push(
+    spawn("bun", ["apps/api/src/worker.mjs"], {
+      env,
+      stdio: "inherit",
+    }),
+  );
+}
+
 function shutdown(signal) {
   for (const child of processes) child.kill(signal);
 }

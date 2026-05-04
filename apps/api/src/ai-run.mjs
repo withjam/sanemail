@@ -7,6 +7,8 @@ const debug = process.argv.includes("--debug") || ["1", "true", "yes", "on"].inc
 const config = loadConfig();
 const limitArg = process.argv.find((arg) => arg.startsWith("--limit="));
 const limit = limitArg ? Number(limitArg.slice("--limit=".length)) : undefined;
+const modeArg = process.argv.find((arg) => arg.startsWith("--mode="));
+const mode = modeArg ? modeArg.slice("--mode=".length) : "cold-start";
 
 function redactSecret(value) {
   if (!value) return "unset";
@@ -31,6 +33,9 @@ debugLog("resolved configuration", {
     timeoutMs: config.ai.timeoutMs,
     maxRetries: config.ai.maxRetries,
     runLimit: config.ai.runLimit,
+    briefingMode: config.ai.briefingMode,
+    cliDefaultBriefingMode: "cold-start",
+    requestedBriefingMode: mode,
     ollamaClassifyMessages: config.ai.ollamaClassifyMessages,
   },
   ollama: {
@@ -54,7 +59,7 @@ if (debug && config.ai.provider !== "ollama") {
 
 let run;
 try {
-  run = await runAiLoop({ limit, trigger: "cli" });
+  run = await runAiLoop({ limit, mode, trigger: "cli" });
 } catch (error) {
   if (debug) {
     console.error("[ai:run debug] run failed");
@@ -81,5 +86,6 @@ debugLog("briefing output", {
     messageId: callout.messageId,
   })),
   prompt: run.output.briefing?.prompt,
+  memory: run.output.briefing?.memory,
 });
 debugLog("provider fallback errors", run.provider?.fallbackErrors || []);

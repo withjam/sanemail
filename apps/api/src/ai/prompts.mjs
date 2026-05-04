@@ -66,6 +66,64 @@ const promptDefinitions = [
       "Category: {{category}}\nNeeds reply: {{needsReply}}\nPossible junk: {{possibleJunk}}\nDirect: {{direct}}\nAge hours: {{ageHours}}\nFeedback: {{feedback}}",
   },
   {
+    id: "mail-classification-batch",
+    version: "2026-05-04.1",
+    stage: "classification",
+    title: "Batch message classification",
+    description:
+      "Classify a recent-first batch into stable system placement and dynamic user message types.",
+    provider: "mock-local",
+    model: "deterministic-classification-batch-v0",
+    temperature: 0,
+    variables: ["policy", "taxonomy", "userSignals", "messages"],
+    responseSchema: {
+      decisions: [
+        {
+          messageId: "string",
+          systemCategory: ["Today", "Needs Reply", "FYI", "Junk Review", "All Mail"],
+          needsReply: "boolean",
+          automated: "boolean",
+          possibleJunk: "boolean",
+          direct: "boolean",
+          score: "number",
+          confidence: "number",
+          reasons: "string[]",
+          actionKinds: "string[]",
+          deadlines: "string[]",
+          entityKeys: "string[]",
+          messageTypes: [
+            {
+              typeId: "string | null",
+              slug: "string",
+              confidence: "number",
+              rank: "number",
+              evidence: "string[]",
+            },
+          ],
+          candidateTypeSuggestions: [
+            {
+              slug: "string",
+              displayName: "string",
+              description: "string",
+              evidence: "string[]",
+            },
+          ],
+        },
+      ],
+    },
+    system: [
+      "You are SaneMail's batch email classification model.",
+      "Classify source-agnostic canonical messages after they have been durably ingested.",
+      "Keep stable system placement separate from personalized user message types.",
+      "Prefer existing active taxonomy types when they fit.",
+      "Suggest candidate types only when the evidence is specific and reusable.",
+      "Be conservative about junk, scams, and security alerts.",
+      "Return compact JSON only.",
+    ].join(" "),
+    userTemplate:
+      "Policy:\n{{policy}}\n\nUser taxonomy:\n{{taxonomy}}\n\nUser signals:\n{{userSignals}}\n\nMessages, newest first:\n{{messages}}",
+  },
+  {
     id: "mail-briefing",
     version: "2026-05-03.3",
     stage: "briefing",

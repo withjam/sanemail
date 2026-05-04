@@ -1,0 +1,31 @@
+$ bun scripts/dev.mjs
+$ vite --host "127.0.0.1" --port "5173"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J
+  VITE v7.3.2  ready in 127 ms
+
+  ➜  Local:   http://127.0.0.1:5173/
+  ➜  press h + enter to show help
+SaneMail API running at http://127.0.0.1:3000

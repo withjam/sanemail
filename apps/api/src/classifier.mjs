@@ -36,6 +36,8 @@ const junkPatterns = [
   "password expires",
 ];
 
+const addressedFeedbackKinds = new Set(["done", "not-important", "junk"]);
+
 function includesAny(value, patterns) {
   const lower = String(value || "").toLowerCase();
   return patterns.some((pattern) => lower.includes(pattern));
@@ -46,6 +48,72 @@ function recipientContains(headers, email) {
   const cc = String(headers.cc || "").toLowerCase();
   const normalized = String(email || "").toLowerCase();
   return normalized && (to.includes(normalized) || cc.includes(normalized));
+}
+
+function latestFeedbackKind(feedback = []) {
+  return [...feedback].sort(
+    (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime(),
+  )[0]?.kind || null;
+}
+
+function recategorize(classification) {
+  if (classification.possibleJunk) return "Junk Review";
+  if (classification.needsReply) return "Needs Reply";
+  if (classification.automated) return "FYI";
+  return classification.todayScore >= 35 ? "Today" : "All Mail";
+}
+
+export function applyFeedbackToClassification(classification, feedback = []) {
+  const latestKind = latestFeedbackKind(feedback);
+  if (!latestKind) {
+    return {
+      ...classification,
+      feedbackState: {
+        latestKind: null,
+        addressed: false,
+      },
+    };
+  }
+
+  const next = {
+    ...classification,
+    reasons: [...classification.reasons],
+    feedbackState: {
+      latestKind,
+      addressed: addressedFeedbackKinds.has(latestKind),
+    },
+  };
+  const forceAllMail = latestKind === "done" || latestKind === "not-important";
+
+  if (latestKind === "junk") {
+    next.possibleJunk = true;
+    next.needsReply = false;
+    next.todayScore -= 70;
+    next.reasons.push("marked as junk");
+  } else if (latestKind === "not-junk") {
+    next.possibleJunk = false;
+    next.todayScore += 10;
+    next.reasons.push("marked as not junk");
+  } else if (latestKind === "done") {
+    next.needsReply = false;
+    next.todayScore -= 55;
+    next.reasons.push("marked done");
+  } else if (latestKind === "not-important") {
+    next.needsReply = false;
+    next.todayScore -= 35;
+    next.reasons.push("marked not important");
+  } else if (latestKind === "needs-reply") {
+    next.needsReply = true;
+    next.todayScore += 35;
+    next.reasons.push("marked as needing attention");
+  } else if (latestKind === "important") {
+    next.todayScore += 20;
+    next.reasons.push("marked important");
+  }
+
+  next.todayScore = Math.round(next.todayScore);
+  next.category = forceAllMail && !next.possibleJunk ? "All Mail" : recategorize(next);
+  return next;
 }
 
 export function classifyMessage(message, account) {
@@ -115,7 +183,10 @@ export function getClassifiedMessages(store, account) {
     .filter((message) => !account || message.accountId === account.id)
     .map((message) => ({
       ...message,
-      sane: classifyMessage(message, account || {}),
+      sane: applyFeedbackToClassification(
+        classifyMessage(message, account || {}),
+        store.feedback.filter((entry) => entry.messageId === message.id),
+      ),
       feedback: store.feedback.filter((entry) => entry.messageId === message.id),
     }));
 }

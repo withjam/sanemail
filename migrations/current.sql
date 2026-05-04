@@ -1,0 +1,1 @@
+-- Write the next idempotent migration here. Run `bun run db:current` while iterating.

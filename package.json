@@ -10,12 +10,21 @@
   "scripts": {
     "dev": "bun scripts/dev.mjs",
     "start": "bun apps/api/src/server.mjs",
+    "worker": "bun apps/api/src/worker.mjs",
+    "db:ensure": "bun scripts/db-ensure.mjs",
+    "db:bootstrap": "bun run db:ensure && bun run db:current",
+    "db:migrate": "graphile-migrate migrate",
+    "db:current": "graphile-migrate watch --once",
+    "db:watch": "graphile-migrate watch",
+    "db:commit": "graphile-migrate commit",
+    "db:status": "graphile-migrate status",
+    "db:reset:dev": "graphile-migrate reset --erase",
     "seed": "bun apps/api/src/dev-seed.mjs",
     "demo:reset": "bun apps/api/src/demo-reset.mjs",
     "ai:run": "bun apps/api/src/ai-run.mjs",
     "ai:verify": "bun apps/api/src/ai-verify.mjs",
     "build": "bun run --cwd apps/web build",
-    "check": "node --check apps/api/src/server.mjs && node --check apps/api/src/config.mjs && node --check apps/api/src/store.mjs && node --check apps/api/src/gmail.mjs && node --check apps/api/src/classifier.mjs && node --check apps/api/src/demo-data.mjs && node --check apps/api/src/ai/prompts.mjs && node --check apps/api/src/ai/golden-records.mjs && node --check apps/api/src/ai/ollama.mjs && node --check apps/api/src/ai/phoenix.mjs && node --check apps/api/src/ai/pipeline.mjs && node --check apps/api/src/ai/verification.mjs && node --check apps/api/src/ai-run.mjs && node --check apps/api/src/ai-verify.mjs && node --check apps/api/src/demo-reset.mjs && node --check apps/api/src/dev-seed.mjs && node --check scripts/smoke.mjs && bun run --cwd apps/web typecheck",
+    "check": "node --check apps/api/src/server.mjs && node --check apps/api/src/config.mjs && node --check apps/api/src/store.mjs && node --check apps/api/src/queue.mjs && node --check apps/api/src/worker.mjs && node --check apps/api/src/gmail.mjs && node --check apps/api/src/classifier.mjs && node --check apps/api/src/demo-data.mjs && node --check apps/api/src/ai/prompts.mjs && node --check apps/api/src/ai/golden-records.mjs && node --check apps/api/src/ai/ollama.mjs && node --check apps/api/src/ai/phoenix.mjs && node --check apps/api/src/ai/pipeline.mjs && node --check apps/api/src/ai/verification.mjs && node --check apps/api/src/ai-run.mjs && node --check apps/api/src/ai-verify.mjs && node --check apps/api/src/demo-reset.mjs && node --check apps/api/src/dev-seed.mjs && node --check scripts/db-ensure.mjs && node --check scripts/db-env.cjs && node --check scripts/smoke.mjs && bun run --cwd apps/web typecheck",
     "test": "node --test",
     "smoke": "bun run build && node scripts/smoke.mjs",
     "e2e": "bun run build && bun run --cwd apps/web playwright test --config ../../playwright.config.ts",
@@ -24,10 +33,13 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.57.0",
+    "graphile-migrate": "^1.4.1",
     "typescript": "^5.9.3"
   },
   "dependencies": {
     "@arizeai/phoenix-otel": "^1.0.0",
-    "ollama": "^0.6.3"
+    "graphile-worker": "^0.16.6",
+    "ollama": "^0.6.3",
+    "pg": "^8.20.0"
   }
 }

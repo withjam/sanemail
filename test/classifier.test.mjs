@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyMessage } from "../apps/api/src/classifier.mjs";
+import { applyFeedbackToClassification, classifyMessage } from "../apps/api/src/classifier.mjs";
 
 const account = { email: "me@example.com" };
 
@@ -69,4 +69,26 @@ test("routes scam-like mail to junk review", () => {
 
   assert.equal(result.category, "Junk Review");
   assert.equal(result.possibleJunk, true);
+});
+
+test("done feedback clears an item from needing attention", () => {
+  const initial = classifyMessage(
+    message({
+      subject: "Can you review this?",
+      bodyText: "Could you review this and let me know your thoughts?",
+    }),
+    account,
+  );
+  const result = applyFeedbackToClassification(initial, [
+    {
+      id: "feedback-one",
+      messageId: "message-one",
+      kind: "done",
+      createdAt: new Date().toISOString(),
+    },
+  ]);
+
+  assert.equal(result.needsReply, false);
+  assert.equal(result.category, "All Mail");
+  assert.equal(result.feedbackState.addressed, true);
 });

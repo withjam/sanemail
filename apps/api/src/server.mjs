@@ -26,6 +26,7 @@ import {
   upsertSyncedMessages,
 } from "./store.mjs";
 import { getClassifiedMessages } from "./classifier.mjs";
+import { enqueueJob, listQueueJobs } from "./queue.mjs";
 import { resetDemoData } from "./demo-data.mjs";
 import { getPromptRecords } from "./ai/prompts.mjs";
 import { buildInboxBriefing, runAiLoop } from "./ai/pipeline.mjs";
@@ -92,23 +93,77 @@ function decisionMap(run) {
   return new Map((run?.output?.decisions || []).map((decision) => [decision.messageId, decision]));
 }
 
-function hasUpcomingSignal(message, decision) {
+const upcomingTermPattern =
+  /\b(autopay|appointment|boarding pass|check-in|deadline|due|expires|flight|invoice|lesson|payment|pickup|registration|reminder|renewal|renews|reservation|scheduled|starts|street sweeping|ticket)\b|\b(bill|dues|installment|permit|refill|subscription)\b/i;
+const upcomingTimePattern =
+  /\bby\s+(today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+(morning|afternoon|evening)\b|\b(tomorrow|next week)\b/i;
+const completedUpdatePattern =
+  /\b(no action needed|no action is needed|package delivered|was delivered|receipt total|thanks for your order|refund processed|payment posted successfully)\b/i;
+
+function messageTime(message) {
+  const time = new Date(message.date || Number(message.internalDate) || 0).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+function sortByDateDesc(messages) {
+  return [...messages].sort((a, b) => messageTime(b) - messageTime(a));
+}
+
+function sortByAttention(messages) {
+  return [...messages].sort((a, b) => {
+    if (b.sane.todayScore !== a.sane.todayScore) return b.sane.todayScore - a.sane.todayScore;
+    return messageTime(b) - messageTime(a);
+  });
+}
+
+export function hasUpcomingSignal(message, decision) {
   const text = `${message.subject || ""}\n${message.snippet || ""}\n${message.bodyText || ""}`.toLowerCase();
-  return (
-    (decision?.extracted?.deadlines || []).length > 0 ||
-    (decision?.extracted?.actions || []).some((action) =>
-      ["pay", "schedule", "confirm", "sign", "review"].includes(action),
-    ) ||
-    /\b(deadline|due|tomorrow|bill|statement|flight|check-in|appointment|reservation)\b|\bby\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+(morning|afternoon|evening)\b/.test(
-      text,
-    )
-  );
+  const extractedDeadlines = decision?.extracted?.deadlines || [];
+  const extractedActions = decision?.extracted?.actions || [];
+  const explicitUpcomingText = upcomingTermPattern.test(text) || upcomingTimePattern.test(text);
+  const usefulDeadline = extractedDeadlines.some((deadline) => {
+    const normalized = String(deadline || "").toLowerCase();
+    if (!normalized) return false;
+    if (["today", "this morning"].includes(normalized)) return explicitUpcomingText;
+    return true;
+  });
+  const usefulAction =
+    explicitUpcomingText &&
+    extractedActions.some((action) => ["pay", "schedule", "confirm", "sign"].includes(action));
+
+  if (completedUpdatePattern.test(text) && !usefulDeadline) return false;
+  return explicitUpcomingText || usefulDeadline || usefulAction;
 }
 
 function messageAgeHours(message) {
-  const time = new Date(message.date || Number(message.internalDate) || 0).getTime();
+  const time = messageTime(message);
   if (!Number.isFinite(time)) return 9999;
   return Math.max(0, (Date.now() - time) / 36e5);
+}
+
+export function buildHomeTabs(messages, decisions = new Map()) {
+  const visible = messages
+    .filter((message) => !message.sane.possibleJunk)
+    .map((message) => ({
+      message,
+      upcoming: hasUpcomingSignal(message, decisions.get(message.id)),
+    }));
+
+  const needsReply = sortByAttention(
+    visible.filter((item) => item.message.sane.needsReply).map((item) => item.message),
+  ).slice(0, 8);
+  const upcoming = sortByDateDesc(
+    visible
+      .filter((item) => !item.message.sane.needsReply && item.upcoming)
+      .map((item) => item.message),
+  ).slice(0, 8);
+  const mostRecent = sortByDateDesc(
+    visible
+      .filter((item) => !item.message.sane.needsReply && !item.upcoming)
+      .map((item) => item.message),
+  ).slice(0, 8);
+
+  return { mostRecent, needsReply, upcoming };
 }
 
 function publicAccount(account) {
@@ -160,7 +215,7 @@ async function routeStatus(response) {
     counts: {
       messages: messages.length,
       today: today.length,
-      needsReply: messages.filter((message) => message.sane.needsReply).length,
+      needsReply: messages.filter((message) => !message.sane.possibleJunk && message.sane.needsReply).length,
       junkReview: messages.filter((message) => message.sane.possibleJunk).length,
     },
     gmailReadonly: config.google.readonlyScope,
@@ -187,6 +242,7 @@ async function routeHome(response) {
   const run = latestAiRun(store);
   const storedBriefing = latestInboxBriefing(store, account?.id);
   const decisions = decisionMap(run);
+  const tabs = buildHomeTabs(messages, decisions);
   const briefing =
     storedBriefing ||
     run?.output?.briefing ||
@@ -218,8 +274,6 @@ async function routeHome(response) {
       }),
       { previousBriefing: storedBriefing },
     );
-  const upcoming = visibleMessages.filter((message) => hasUpcomingSignal(message, decisions.get(message.id)));
-
   sendJson(response, {
     briefing: {
       ...briefing,
@@ -227,11 +281,7 @@ async function routeHome(response) {
       provider: briefing.provider || run?.provider || null,
       stale: !storedBriefing && !run?.output?.briefing,
     },
-    tabs: {
-      mostRecent: visibleMessages.slice(0, 8),
-      needsReply: visibleMessages.filter((message) => message.sane.needsReply).slice(0, 8),
-      upcoming: upcoming.slice(0, 8),
-    },
+    tabs,
   });
 }
 
@@ -262,7 +312,15 @@ async function routeSyncGmail(response) {
   const account = await getFreshAccount();
   const messages = await syncRecentMessages(config, account);
   const result = await upsertSyncedMessages(account, messages);
-  sendJson(response, { ok: true, result });
+  const queued = await enqueueJob("classification.batch", {
+    userId: account.id,
+    accountId: account.id,
+    classifierVersion: "local-json-v0",
+    reason: "post_ingest",
+    maxBatchSize: config.queue.classificationBatchSize,
+    requestedAt: new Date().toISOString(),
+  });
+  sendJson(response, { ok: true, result, queued });
 }
 
 async function routeDisconnect(response) {
@@ -278,11 +336,13 @@ async function routeDemoReset(response) {
 async function routeAiControl(response) {
   const runs = await listAiRuns(20);
   const verificationRuns = await listVerificationRuns(20);
+  const queueJobs = await listQueueJobs(20);
   sendJson(response, {
     prompts: getPromptRecords(),
     observability: getPhoenixStatus(),
     latestRun: runs[0] || null,
     runs,
+    queueJobs,
     latestVerification: verificationRuns[0] || null,
     verificationRuns,
   });
@@ -291,7 +351,8 @@ async function routeAiControl(response) {
 async function routeAiRun(request, response) {
   const body = await parseJsonBody(request);
   const limit = body.limit ? Number(body.limit) : undefined;
-  const run = await runAiLoop({ limit, trigger: "api" });
+  const mode = body.mode;
+  const run = await runAiLoop({ limit, mode, trigger: "api" });
   sendJson(response, { ok: true, run });
 }
 
@@ -400,6 +461,9 @@ async function handleApi(url, request, response) {
   if (request.method === "POST" && url.pathname === "/api/disconnect") return routeDisconnect(response);
   if (request.method === "POST" && url.pathname === "/api/demo/reset") return routeDemoReset(response);
   if (request.method === "GET" && url.pathname === "/api/ai/control") return routeAiControl(response);
+  if (request.method === "GET" && url.pathname === "/api/queue/jobs") {
+    return sendJson(response, { jobs: await listQueueJobs(50) });
+  }
   if (request.method === "GET" && url.pathname === "/api/ai/runs") {
     return sendJson(response, { runs: await listAiRuns(50) });
   }

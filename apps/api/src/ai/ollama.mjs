@@ -177,13 +177,20 @@ function normalizeBriefing(payload, fallback, model) {
     narrative.mightBeMissing,
     narrative.needsAttention,
   ].filter(Boolean).join(" ") || fallback.text);
+  const generatedAt = new Date().toISOString();
 
   return {
     ...fallback,
     text,
     narrative,
     callouts: normalizeCallouts(payload.callouts, fallback.callouts || []),
-    generatedAt: new Date().toISOString(),
+    generatedAt,
+    memory: fallback.memory
+      ? {
+          ...fallback.memory,
+          producedAt: generatedAt,
+        }
+      : fallback.memory,
     source: "ai-loop",
     model,
   };

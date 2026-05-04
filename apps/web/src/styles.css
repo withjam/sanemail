@@ -413,6 +413,7 @@ textarea {
 
 .tab-button:hover,
 .tab-button.active {
+  border-color: var(--line);
   background: var(--surface-2);
   color: var(--ink);
 }
@@ -600,17 +601,6 @@ textarea {
   color: var(--warning);
   border-color: #f1d58f;
   background: var(--warning-bg);
-}
-
-.virtual-list {
-  height: min(calc(100vh - 190px), 760px);
-  overflow: auto;
-}
-
-.virtual-row {
-  position: absolute;
-  inset-inline: 0;
-  top: 0;
 }
 
 .message-detail-header {

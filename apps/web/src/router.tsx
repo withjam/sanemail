@@ -6,7 +6,6 @@ import {
   createRouter,
   useParams,
 } from "@tanstack/react-router";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Activity,
   AlertTriangle,
@@ -32,7 +31,7 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
   AiRun,
@@ -271,9 +270,12 @@ function Dashboard() {
           ))}
         </div>
         <div
+          key={active.id}
           role="tabpanel"
           id={`home-panel-${active.id}`}
           aria-labelledby={`home-tab-${active.id}`}
+          data-testid="home-tab-panel"
+          data-active-tab={active.id}
         >
           <MessageStack messages={active.messages} empty={emptyForHomeTab(active.id)} />
         </div>
@@ -406,7 +408,6 @@ function MailRoute() {
       subtitle="The faithful view over every locally synced message."
       messages={query.data.messages}
       empty="No messages synced yet."
-      virtual
     />
   );
 }
@@ -416,13 +417,11 @@ function MessageListPage({
   subtitle,
   messages,
   empty,
-  virtual = false,
 }: {
   title: string;
   subtitle: string;
   messages: MailMessage[];
   empty: string;
-  virtual?: boolean;
 }) {
   return (
     <div className="page-grid">
@@ -431,42 +430,8 @@ function MessageListPage({
         <p>{subtitle}</p>
       </section>
       <section className="surface flush">
-        {virtual ? <VirtualMessageList messages={messages} empty={empty} /> : <MessageStack messages={messages} empty={empty} />}
+        <MessageStack messages={messages} empty={empty} />
       </section>
-    </div>
-  );
-}
-
-function VirtualMessageList({ messages, empty }: { messages: MailMessage[]; empty: string }) {
-  const parentRef = useRef<HTMLDivElement | null>(null);
-  const rowVirtualizer = useVirtualizer({
-    count: messages.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => 92,
-    overscan: 8,
-  });
-
-  if (!messages.length) return <EmptyState text={empty} />;
-
-  return (
-    <div ref={parentRef} className="virtual-list">
-      <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: "relative" }}>
-        {rowVirtualizer.getVirtualItems().map((virtualItem) => {
-          const message = messages[virtualItem.index];
-          return (
-            <div
-              key={message.id}
-              className="virtual-row"
-              style={{
-                height: `${virtualItem.size}px`,
-                transform: `translateY(${virtualItem.start}px)`,
-              }}
-            >
-              <MessageRow message={message} />
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }

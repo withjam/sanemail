@@ -1,5 +1,126 @@
 export type SaneCategory = "Today" | "Needs Reply" | "FYI" | "Junk Review" | "All Mail";
 
+export type MailProvider = "gmail" | "outlook" | "imap" | "mx";
+
+export type MessageTypeKind =
+  | "system_seed"
+  | "discovered"
+  | "user_defined"
+  | "imported_source_label";
+
+export type MessageTypeStatus = "candidate" | "active" | "muted" | "archived";
+
+export type MessageTypeScope = "all_sources" | "source";
+
+export type MessageTypeBriefPolicy = "always" | "important_only" | "daily_digest" | "never";
+
+export type MessageTypeImportance = "high" | "normal" | "low";
+
+export type QueueJobName =
+  | "source.sync"
+  | "classification.batch"
+  | "message-types.discover"
+  | "brief.generate";
+
+export type SourceSyncJobPayload = {
+  sourceConnectionId: string;
+  userId: string;
+  trigger: "watch" | "poll" | "manual" | "backfill" | "recovery";
+  cursorHint?: string;
+  requestedAt: string;
+};
+
+export type ClassificationBatchJobPayload = {
+  userId: string;
+  classifierVersion: string;
+  taxonomyVersion?: string;
+  reason: "post_ingest" | "retry" | "taxonomy_changed" | "manual";
+  maxBatchSize?: number;
+  requestedAt: string;
+};
+
+export type MessageTypesDiscoveryJobPayload = {
+  userId: string;
+  taxonomyVersion?: string;
+  reason: "classification_batch" | "feedback_threshold" | "manual";
+  requestedAt: string;
+};
+
+export type BriefGenerateJobPayload = {
+  userId: string;
+  scopeType: "all_sources" | "source";
+  sourceConnectionId?: string | null;
+  trigger: "post_ingest" | "scheduled_daily" | "manual" | "feedback_update";
+  requestedAt: string;
+};
+
+export type QueueJobSummary = {
+  id: string;
+  name: QueueJobName;
+  key: string;
+  queue: string;
+  status: "pending" | "running" | "succeeded" | "dead";
+  payload: Record<string, unknown>;
+  attempts: number;
+  maxAttempts: number;
+  runAt: string;
+  createdAt: string;
+  updatedAt?: string;
+  completedAt?: string;
+  failedAt?: string;
+  lastError?: string;
+};
+
+export type SourceConnectionStatus =
+  | "active"
+  | "paused"
+  | "reauth_required"
+  | "sync_error"
+  | "deleted";
+
+export type SourceConnectionSummary = {
+  id: string;
+  userId?: string;
+  provider: MailProvider;
+  sourceEmail: string;
+  displayName?: string;
+  status: SourceConnectionStatus;
+  scope?: string;
+  lastSuccessfulSyncAt?: string;
+  lastFailedSyncAt?: string;
+  syncCursorKind?: string;
+  syncCursorUpdatedAt?: string;
+  demo?: boolean;
+  updatedAt?: string;
+};
+
+export type MessageTypeSummary = {
+  id: string;
+  userId?: string;
+  slug: string;
+  displayName: string;
+  description?: string;
+  kind: MessageTypeKind;
+  status: MessageTypeStatus;
+  scope: MessageTypeScope;
+  sourceConnectionId?: string | null;
+  parentTypeId?: string | null;
+  defaultImportance?: MessageTypeImportance;
+  briefPolicy?: MessageTypeBriefPolicy;
+  taxonomyVersion?: string;
+  updatedAt?: string;
+};
+
+export type MessageTypeAssignment = {
+  messageTypeId: string;
+  displayName: string;
+  confidence: number;
+  rank: number;
+  state?: "current" | "rejected" | "superseded";
+  evidence?: string[];
+  taxonomyVersion?: string;
+};
+
 export type SaneClassification = {
   category: SaneCategory;
   todayScore: number;
@@ -9,6 +130,12 @@ export type SaneClassification = {
   direct: boolean;
   reasons: string[];
   classifiedAt: string;
+  feedbackState?: {
+    latestKind: FeedbackKind | null;
+    addressed: boolean;
+  };
+  messageTypes?: MessageTypeAssignment[];
+  taxonomyVersion?: string;
 };
 
 export type Feedback = {
@@ -28,11 +155,13 @@ export type FeedbackKind =
 
 export type MailMessage = {
   id: string;
+  sourceConnectionId?: string;
   accountId: string;
-  provider: "gmail";
+  provider: MailProvider;
   providerMessageId: string;
   providerThreadId: string;
   sourceLabels: string[];
+  sourceRefs?: MessageSourceRef[];
   historyId?: string;
   internalDate?: string;
   subject: string;
@@ -43,6 +172,7 @@ export type MailMessage = {
   snippet: string;
   bodyText: string;
   headers: Record<string, string>;
+  features?: MessageClassificationFeatures;
   syncedAt?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -50,9 +180,40 @@ export type MailMessage = {
   feedback: Feedback[];
 };
 
+export type MessageClassificationFeatures = {
+  senderDomain?: string;
+  listId?: string;
+  listUnsubscribePresent?: boolean;
+  sourceLabelKeys?: string[];
+  directness?: "to" | "cc" | "bcc" | "list" | "unknown";
+  bulkHint?: boolean;
+  transactionalHint?: boolean;
+  securityHint?: boolean;
+  calendarHint?: boolean;
+  entityKeys?: string[];
+  actionKinds?: string[];
+  deadlineAt?: string | null;
+  featureVersion?: string;
+};
+
+export type MessageSourceRef = {
+  id: string;
+  messageId: string;
+  sourceConnectionId: string;
+  provider: MailProvider;
+  providerMessageId: string;
+  providerThreadId?: string;
+  providerLabels?: string[];
+  providerHistoryId?: string;
+  sourceInternalDate?: string;
+  sourceUrl?: string;
+  sourceState?: "present" | "deleted" | "archived" | "spam" | "trash" | "unknown";
+  lastSeenAt?: string;
+};
+
 export type AccountSummary = {
   id: string;
-  provider: "gmail";
+  provider: MailProvider;
   email: string;
   demo?: boolean;
   messagesTotal?: number;
@@ -98,6 +259,10 @@ export type SyncResponse = {
     updated: number;
     count: number;
   };
+  queued?: {
+    enqueued: boolean;
+    job: QueueJobSummary;
+  };
 };
 
 export type DemoResetResponse = SyncResponse & {
@@ -141,6 +306,7 @@ export type AiDecision = {
   possibleJunk: boolean;
   automated: boolean;
   direct: boolean;
+  addressed?: boolean;
   confidence: number;
   recsysScore: number;
   suppressFromToday: boolean;
@@ -156,6 +322,12 @@ export type AiDecision = {
     deadlines: string[];
     entities: string[];
     replyCue: string | null;
+  };
+  feedback?: {
+    kinds: FeedbackKind[];
+    latestKind: FeedbackKind | null;
+    latestAt: string | null;
+    addressed: boolean;
   };
   embedding: {
     model: string;
@@ -209,6 +381,18 @@ export type InboxBriefing = {
     carriedOver?: number;
   };
   messageIds: string[];
+  memory?: {
+    mode: "cold_start" | "iterative";
+    producedAt: string;
+    since: string | null;
+    previousBriefingId: string | null;
+    previousGeneratedAt: string | null;
+    includedMessageIds: string[];
+    newMessageIds: string[];
+    carryOverMessageIds: string[];
+    unresolvedPreviousMessageIds: string[];
+    resolvedPreviousMessageIds: string[];
+  };
   carryOver?: {
     previousBriefingId: string | null;
     previousGeneratedAt: string | null;
@@ -259,6 +443,15 @@ export type AiRun = {
     accountId: string | null;
     messageCount: number;
     corpusHash: string;
+    briefingFlow?: "cold_start" | "iterative";
+    messageSelection?: {
+      mode: "cold_start" | "iterative";
+      since: string | null;
+      includedMessageIds: string[];
+      newMessageIds: string[];
+      carryOverMessageIds: string[];
+      resolvedPreviousMessageIds: string[];
+    } | null;
     previousBriefing?: {
       id: string | null;
       generatedAt: string | null;
@@ -342,6 +535,7 @@ export type AiControlResponse = {
   observability: PhoenixObservabilityStatus;
   latestRun: AiRun | null;
   runs: AiRun[];
+  queueJobs?: QueueJobSummary[];
   latestVerification: AiVerificationRun | null;
   verificationRuns: AiVerificationRun[];
 };

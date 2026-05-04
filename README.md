@@ -79,12 +79,45 @@ bun run ai:run
 bun run ai:verify
 ```
 
+`bun run ai:run` defaults to a cold-start briefing over the local mailbox for
+repeatable dev/eval output. Use `bun apps/api/src/ai-run.mjs --mode=iterative`
+to test the memory-aware briefing flow.
+
+Run the local development queue worker:
+
+```sh
+bun run worker
+```
+
+The prototype queue is dependency-free and stored in `data/sanemail.json` under
+`queueJobs`. It mirrors the production job names we expect to run with a
+Postgres-backed queue later: `source.sync`, `classification.batch`,
+`message-types.discover`, and `brief.generate`. To start the worker alongside
+`bun run dev`, set:
+
+```sh
+QUEUE_WORKER_ENABLED=true bun run dev
+```
+
+To use your Docker Postgres as the queue backend, set:
+
+```sh
+QUEUE_DRIVER=graphile-worker QUEUE_WORKER_ENABLED=true bun run dev
+```
+
+Or keep the API and worker as separate processes:
+
+```sh
+QUEUE_DRIVER=graphile-worker bun run dev
+QUEUE_DRIVER=graphile-worker bun run worker
+```
+
 Use Ollama Cloud with DeepSeek V4 Pro:
 
 ```sh
 ollama pull deepseek-v4-pro:cloud
-AI_PROVIDER=ollama OLLAMA_MODEL=deepseek-v4-pro:cloud OLLAMA_THINK=high bun run ai:run
-AI_PROVIDER=ollama OLLAMA_MODEL=deepseek-v4-pro:cloud OLLAMA_THINK=high bun run dev
+AI_PROVIDER=ollama OLLAMA_MODEL=deepseek-v4-pro:cloud OLLAMA_THINK=false OLLAMA_TEMPERATURE=0 bun run ai:run
+AI_PROVIDER=ollama OLLAMA_MODEL=deepseek-v4-pro:cloud OLLAMA_THINK=false OLLAMA_TEMPERATURE=0 bun run dev
 ```
 
 Send local AI traces to Phoenix:
@@ -126,7 +159,63 @@ Create a `.env` file from `.env.example`:
 cp .env.example .env
 ```
 
-Then set:
+For local Postgres running in Docker, set either `DATABASE_URL` directly:
+
+```text
+DATABASE_URL=postgres://postgres:your_password@127.0.0.1:5432/sanemail
+```
+
+or set the parts and let the API build the URL:
+
+```text
+POSTGRES_HOST=127.0.0.1
+POSTGRES_PORT=5432
+POSTGRES_DB=sanemail
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=your_password
+```
+
+`QUEUE_DATABASE_URL` is optional; leave it blank to reuse `DATABASE_URL` when we
+switch the queue driver from `local-json` to a Postgres-backed worker.
+
+Graphile Migrate uses the same database settings. For local development it also
+uses a shadow database so it can validate migrations before committing them:
+
+```text
+POSTGRES_SHADOW_DB=sanemail_shadow
+POSTGRES_ROOT_DB=postgres
+SHADOW_DATABASE_URL=
+ROOT_DATABASE_URL=
+```
+
+Leave `SHADOW_DATABASE_URL` and `ROOT_DATABASE_URL` blank for Docker Postgres;
+the scripts derive them from `DATABASE_URL` or the `POSTGRES_*` parts.
+
+Bootstrap the app schema:
+
+```sh
+bun run db:bootstrap
+```
+
+This creates the main and shadow databases when needed, then applies
+committed migrations plus `migrations/current.sql`. While iterating on the
+schema, run:
+
+```sh
+bun run db:watch
+```
+
+When a schema change is ready to become a durable migration:
+
+```sh
+bun run db:commit --message "describe the change"
+bun run db:migrate
+```
+
+`bun run db:reset:dev` is destructive and should only be used against disposable
+local databases.
+
+For Gmail OAuth, set:
 
 ```text
 GOOGLE_CLIENT_ID=...

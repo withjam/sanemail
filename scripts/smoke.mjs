@@ -164,8 +164,8 @@ try {
     }
   });
   await expectJson(origin, "/api/ai/control", (payload) => {
-    if (payload.prompts.length !== 4) {
-      throw new Error(`Expected 4 AI prompts; got ${payload.prompts.length}`);
+    if (!payload.prompts.some((prompt) => prompt.id === "mail-classification-batch")) {
+      throw new Error("AI control did not expose the batch classification prompt.");
     }
   });
   await postJson(origin, "/api/ai/run", {}, (payload) => {

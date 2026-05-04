@@ -14,6 +14,7 @@ function emptyStore() {
     threads: [],
     feedback: [],
     events: [],
+    queueJobs: [],
     aiRuns: [],
     inboxBriefings: [],
     verificationRuns: [],

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "bun src/server.mjs",
     "start": "bun src/server.mjs",
+    "worker": "bun src/worker.mjs",
     "seed": "bun src/dev-seed.mjs"
   }
 }
