@@ -64,7 +64,8 @@ The API runs at `http://localhost:3000`. The React PWA runs at
 `http://localhost:5173` in development.
 
 The seed command creates a deterministic 200-message golden mailbox so the UI
-can be tested without Gmail credentials.
+can be tested without Gmail credentials. It is synced from a local `mock` source
+connection, so it follows the same source-ingestion shape as real mail.
 
 Reset local data back to the deterministic 200-message demo mailbox:
 
@@ -72,16 +73,33 @@ Reset local data back to the deterministic 200-message demo mailbox:
 bun run demo:reset
 ```
 
+Seed or resync the synthetic development mailbox without clearing existing local
+state:
+
+```sh
+curl -X POST http://localhost:3000/api/sync/mock
+```
+
+That endpoint runs a manual source sync against the local `mock` source. The
+same sync logic is also available to the queue worker through the `source.sync`
+job, which lets us exercise async ingestion without turning on automatic queue
+chaining.
+
 Run the local AI loop and synthetic verification suite:
 
 ```sh
 bun run ai:run
 bun run ai:verify
+bun run ai:eval
 ```
 
 `bun run ai:run` defaults to a cold-start briefing over the local mailbox for
 repeatable dev/eval output. Use `bun apps/api/src/ai-run.mjs --mode=iterative`
 to test the memory-aware briefing flow.
+
+Prompt/model changes are evaluated as immutable AI contracts: each prompt has a
+prompt hash, model-binding hash, and combined contract hash. `bun run ai:eval`
+checks golden behavior plus eval coverage for every prompt contract.
 
 Run the local development queue worker:
 
@@ -92,8 +110,12 @@ bun run worker
 The prototype queue is dependency-free and stored in `data/sanemail.json` under
 `queueJobs`. It mirrors the production job names we expect to run with a
 Postgres-backed queue later: `source.sync`, `classification.batch`,
-`message-types.discover`, and `brief.generate`. To start the worker alongside
-`bun run dev`, set:
+`message-types.discover`, and `brief.generate`.
+
+Queue work is manual by default. The API will not automatically enqueue
+post-ingest classification or brief jobs unless `QUEUE_AUTO_POST_INGEST_JOBS`
+is set to `true`; leave it `false` while we are validating fast, secure source
+sync. To start the worker alongside `bun run dev`, set:
 
 ```sh
 QUEUE_WORKER_ENABLED=true bun run dev
@@ -177,6 +199,18 @@ POSTGRES_PASSWORD=your_password
 
 `QUEUE_DATABASE_URL` is optional; leave it blank to reuse `DATABASE_URL` when we
 switch the queue driver from `local-json` to a Postgres-backed worker.
+
+To run the app data store on Postgres instead of `data/sanemail.json`, set:
+
+```text
+STORE_DRIVER=postgres
+APP_SECRET=replace_with_a_long_random_secret
+```
+
+`APP_SECRET` is required before SaneMail stores Gmail OAuth tokens or Postgres
+message bodies. Use a stable local value; changing it makes previously encrypted
+local tokens and message bodies unreadable. `ENCRYPTION_KEY` may be used instead
+when you want to manage a raw 32-byte key directly.
 
 Graphile Migrate uses the same database settings. For local development it also
 uses a shadow database so it can validate migrations before committing them:
@@ -275,7 +309,8 @@ To clear local app data from the UI, open Settings and choose
 `Disconnect and delete local data`. This does not change Gmail.
 
 To repopulate the local 200-message golden mailbox from the UI, open Settings
-and choose `Reset demo data`.
+and choose `Reset demo data`. The topbar `Sync demo` action resyncs the mock
+source without clearing other local state.
 
 ## Docker
 

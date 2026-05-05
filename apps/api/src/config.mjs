@@ -74,6 +74,14 @@ export function loadConfig() {
       user: process.env.POSTGRES_USER || "postgres",
       password: process.env.POSTGRES_PASSWORD || "",
     },
+    storage: {
+      driver: String(process.env.STORE_DRIVER || "json").trim().toLowerCase(),
+    },
+    security: {
+      appSecret: process.env.APP_SECRET || "",
+      encryptionKey: process.env.ENCRYPTION_KEY || "",
+      encryptionKeyVersion: process.env.ENCRYPTION_KEY_VERSION || "local-v1",
+    },
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID || "",
       clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
@@ -90,14 +98,13 @@ export function loadConfig() {
       driver: process.env.QUEUE_DRIVER || "local-json",
       databaseUrl: process.env.QUEUE_DATABASE_URL || databaseUrl,
       pollIntervalMs: Number(process.env.QUEUE_POLL_INTERVAL_MS || 1000),
-      classificationBatchSize: Number(process.env.CLASSIFICATION_BATCH_SIZE || 25),
+      classificationBatchSize: Number(process.env.CLASSIFICATION_BATCH_SIZE || 10),
+      autoPostIngestJobs: booleanEnv("QUEUE_AUTO_POST_INGEST_JOBS", false),
     },
     ai: {
-      provider: String(process.env.AI_PROVIDER || "mock").trim().toLowerCase(),
-      fallbackToMock: booleanEnv("AI_FALLBACK_TO_MOCK", true),
       timeoutMs: Number(process.env.AI_TIMEOUT_MS || 120_000),
       maxRetries: Number(process.env.AI_MAX_RETRIES || 2),
-      runLimit: Number(process.env.AI_RUN_LIMIT || 12),
+      runLimit: Number(process.env.AI_RUN_LIMIT || 150),
       briefingMode: process.env.AI_BRIEFING_MODE || "auto",
       ollamaClassifyMessages: booleanEnv("AI_OLLAMA_CLASSIFY_MESSAGES", false),
     },
@@ -122,5 +129,18 @@ export function validateGoogleConfig(config) {
   const missing = [];
   if (!config.google.clientId) missing.push("GOOGLE_CLIENT_ID");
   if (!config.google.clientSecret) missing.push("GOOGLE_CLIENT_SECRET");
+  return missing;
+}
+
+export function validateSecurityConfig(config) {
+  const missing = [];
+  const googleConfigured = Boolean(config.google.clientId || config.google.clientSecret);
+  if (
+    (config.storage.driver === "postgres" || googleConfigured) &&
+    !config.security.appSecret &&
+    !config.security.encryptionKey
+  ) {
+    missing.push("APP_SECRET");
+  }
   return missing;
 }

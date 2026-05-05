@@ -6,7 +6,9 @@ recsys pipeline so we can swap in Ollama or another hosted model later.
 
 ## What Exists Now
 
-- prompt registry with pinned versions and SHA-256 hashes
+- prompt registry with pinned versions, model bindings, and SHA-256 contract
+  hashes
+- eval registry that asserts every prompt contract has test coverage
 - golden prompt records for aggregate summary and category-breakdown evals
 - persisted briefing history so each AI run can see the previous briefing
 - AI run records with prompt refs, input hashes, spans, model metadata, scores,
@@ -35,6 +37,7 @@ Run the synthetic verification suite without writing to local app state:
 
 ```sh
 bun run ai:verify
+bun run ai:eval
 ```
 
 Persist a verification run into `data/sanemail.json`:
@@ -88,11 +91,32 @@ Every prompt has:
 - `responseSchema`
 - `system`
 - `userTemplate`
-- computed `hash`
+- computed `promptHash`
+- computed `modelBindingHash`
+- computed `contractHash`
 
-The hash is included in every AI run and verification run. This gives us a
-stable join key when a ranking decision changes because prompt text, schema, or
-model settings changed.
+The prompt hash tracks prompt text, variables, and response schema. The
+model-binding hash tracks provider, model, temperature, and future runtime
+knobs. The contract hash combines both. AI runs and verification runs record the
+contract hash so a prompt edit or a model change is treated as the same kind of
+reviewable AI behavior change.
+
+Eval definitions live in:
+
+```text
+apps/api/src/ai/evals.mjs
+```
+
+`bun run ai:eval` currently checks:
+
+- deterministic per-message classification, extraction, and ranking behavior
+- golden briefing and carry-over behavior
+- coverage for every registered prompt contract, including
+  `mail-classification-batch`
+
+This is the local version of the industry-standard loop: pin a prompt/model
+contract, run deterministic and golden evals on every change, record traces, and
+only promote the contract when the evals pass.
 
 ## Queue-Backed Classification Flow
 
@@ -112,6 +136,12 @@ Current local development starts with a free `local-json` queue stored in
 `data/sanemail.json`. It is a compatibility scaffold, not the production queue.
 Run it with `bun run worker`, or set `QUEUE_WORKER_ENABLED=true` when running
 `bun run dev`.
+
+Automatic queue chaining is intentionally disabled for the current MVP. Manual
+source sync endpoints update app storage immediately, and manually enqueued
+`source.sync` jobs use the same sync path through the worker. Set
+`QUEUE_AUTO_POST_INGEST_JOBS=true` only when we are ready for source sync to
+enqueue downstream classification and brief work automatically.
 
 To use Postgres/Graphile Worker instead, set `QUEUE_DRIVER=graphile-worker` and
 configure `DATABASE_URL` or `POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_DB`/
@@ -133,8 +163,9 @@ Queue chaining:
 1. Gmail watch, fallback polling, manual sync, or backfill enqueues
    `source.sync`.
 2. `source.sync` upserts canonical messages and source refs, updates the source
-   cursor, marks changed messages as `pending` or `stale`, and enqueues
-   `classification.batch` for the owning user.
+   cursor, marks changed messages as `pending` or `stale`, and, when automatic
+   post-ingest jobs are enabled, enqueues `classification.batch` for the owning
+   user.
 3. `classification.batch` claims a recent-first batch from
    `message_classification_state`, runs the classification chain, persists
    `message_classifications`, `message_type_assignments`, `message_features`,

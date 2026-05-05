@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildDemoMessages, DEMO_MESSAGE_COUNT } from "../apps/api/src/demo-data.mjs";
+import { getAiEvalRecords } from "../apps/api/src/ai/evals.mjs";
 import {
   evaluateGoldenPromptRecords,
   getGoldenPreviousBriefing,
@@ -19,7 +20,15 @@ const account = {
 
 test("prompt registry exposes stable prompt hashes and rendering", () => {
   const prompts = getPromptRecords();
+  const ollamaBoundPrompts = getPromptRecords({
+    "mail-triage": {
+      provider: "ollama",
+      model: "deepseek-v4-pro:cloud",
+      temperature: 0,
+    },
+  });
   const triage = prompts.find((prompt) => prompt.id === "mail-triage");
+  const triageOllama = ollamaBoundPrompts.find((prompt) => prompt.id === "mail-triage");
   const rendered = renderPrompt("mail-triage", {
     subject: "Hello",
     from: "Alex <alex@example.com>",
@@ -31,8 +40,28 @@ test("prompt registry exposes stable prompt hashes and rendering", () => {
 
   assert.ok(triage);
   assert.match(triage.hash, /^[a-f0-9]{64}$/);
+  assert.match(triage.promptHash, /^[a-f0-9]{64}$/);
+  assert.match(triage.modelBindingHash, /^[a-f0-9]{64}$/);
+  assert.match(triage.contractHash, /^[a-f0-9]{64}$/);
   assert.equal(rendered.hash, triage.hash);
+  assert.equal(rendered.contractHash, triage.contractHash);
+  assert.equal(triageOllama.promptHash, triage.promptHash);
+  assert.notEqual(triageOllama.modelBindingHash, triage.modelBindingHash);
+  assert.notEqual(triageOllama.contractHash, triage.contractHash);
   assert.match(rendered.user, /Could you review this/);
+});
+
+test("eval registry covers every prompt contract", () => {
+  const promptIds = getPromptRecords().map((prompt) => prompt.id);
+  const evals = getAiEvalRecords();
+
+  for (const promptId of promptIds) {
+    assert.equal(
+      evals.some((evalRecord) => evalRecord.promptIds.includes(promptId)),
+      true,
+      `${promptId} should have at least one eval`,
+    );
+  }
 });
 
 test("AI loop creates instrumented decisions over synthetic mail", () => {
@@ -203,7 +232,7 @@ test("synthetic verification suite passes with the local AI loop", async () => {
   const run = await runSyntheticVerification({ persist: false });
 
   assert.equal(run.status, "passed");
-  assert.equal(run.summary.cases, 8);
+  assert.equal(run.summary.cases, 13);
   assert.equal(run.summary.failedCases, 0);
   assert.equal(run.score, 1);
 });

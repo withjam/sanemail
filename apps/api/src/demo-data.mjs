@@ -1,6 +1,15 @@
 import { clearLocalData, upsertAccount, upsertSyncedMessages } from "./store.mjs";
 
 export const DEMO_MESSAGE_COUNT = 200;
+export const MOCK_SOURCE_ACCOUNT = {
+  id: "mock:demo@example.com",
+  userId: "mock:demo@example.com",
+  provider: "mock",
+  email: "demo@example.com",
+  scope: "mock.read",
+  historyId: "mock-history",
+  demo: true,
+};
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -31,7 +40,7 @@ function demoMessage(account, baseTime, input) {
   return {
     id: `${account.id}:message:${input.id}`,
     accountId: account.id,
-    provider: "gmail",
+    provider: account.provider || "mock",
     providerMessageId: input.id,
     providerThreadId: input.threadId,
     sourceLabels: input.labels,
@@ -658,15 +667,12 @@ export function buildDemoMessages(account, baseTime = Date.now()) {
 
 export async function resetDemoData() {
   await clearLocalData();
-  const account = await upsertAccount({
-    id: "gmail:demo@example.com",
-    provider: "gmail",
-    email: "demo@example.com",
-    scope: "https://www.googleapis.com/auth/gmail.readonly",
-    historyId: "demo-history",
-    demo: true,
-  });
-  const messages = buildDemoMessages(account);
+  return syncMockSource();
+}
+
+export async function syncMockSource({ baseTime = Date.now() } = {}) {
+  const account = await upsertAccount(MOCK_SOURCE_ACCOUNT);
+  const messages = buildDemoMessages(account, baseTime);
   const result = await upsertSyncedMessages(account, messages);
   return { account, result };
 }

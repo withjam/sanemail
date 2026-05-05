@@ -13,7 +13,9 @@ import {
   BrainCircuit,
   Check,
   CheckCircle2,
+  Circle,
   Clock3,
+  Database,
   ExternalLink,
   FlaskConical,
   Inbox,
@@ -21,6 +23,8 @@ import {
   Mail,
   MailCheck,
   MessageSquare,
+  Plug,
+  Plus,
   RefreshCw,
   Settings,
   ShieldAlert,
@@ -34,11 +38,13 @@ import {
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
+  AccountSummary,
   AiRun,
   AiVerificationRun,
   FeedbackKind,
   InboxBriefing,
   MailMessage,
+  MailProvider,
   PhoenixObservabilityStatus,
   StatusResponse,
 } from "@sanemail/shared/types";
@@ -55,7 +61,9 @@ import {
   resetDemoData,
   saveFeedback,
   syncGmail,
+  syncMock,
 } from "./api";
+import type { AiRunMode } from "./api";
 import { useOnlineStatus } from "./hooks";
 import { queryClient, queryKeys } from "./query";
 
@@ -156,9 +164,7 @@ function Shell() {
             {online ? <Wifi size={16} /> : <WifiOff size={16} />}
             <span>{online ? "Online" : "Offline cache"}</span>
           </div>
-          <div className="account-line">
-            {status.data?.account?.email || "Gmail not connected"}
-          </div>
+          <SidebarSourcesSummary status={status.data} />
         </div>
       </aside>
       <div className="main-column">
@@ -177,6 +183,36 @@ function Shell() {
   );
 }
 
+function SidebarSourcesSummary({ status }: { status?: StatusResponse }) {
+  if (!status) {
+    return (
+      <div className="account-line" data-testid="sidebar-sources">
+        Loading sources…
+      </div>
+    );
+  }
+  const sources = resolveSources(status);
+  const connectedSources = sources.filter((source) => source.connected);
+  return (
+    <div className="account-line" data-testid="sidebar-sources">
+      <strong>{connectedSources.length} of {sources.length} sources</strong>
+      <ul className="sidebar-source-list">
+        {connectedSources.map((source) => (
+          <li key={source.entry.key} className="sidebar-source-row">
+            <CheckCircle2 size={12} />
+            <span>{source.entry.label}</span>
+            {source.email && <span className="muted">· {source.email}</span>}
+          </li>
+        ))}
+      </ul>
+      <Link to="/settings" className="sidebar-manage-link">
+        <Settings size={12} />
+        Manage sources
+      </Link>
+    </div>
+  );
+}
+
 function SyncButton({ status }: { status?: StatusResponse }) {
   const syncMutation = useMutation({
     mutationFn: syncGmail,
@@ -185,39 +221,49 @@ function SyncButton({ status }: { status?: StatusResponse }) {
     },
   });
   const demoMutation = useMutation({
-    mutationFn: resetDemoData,
+    mutationFn: syncMock,
     onSuccess: () => {
       void queryClient.invalidateQueries();
     },
   });
 
-  if (!status?.account) {
+  if (!status) {
     return (
-      <a className="button primary" href="/api/connect/gmail" data-testid="connect-gmail-link">
-        <Mail size={17} />
-        Connect Gmail
-      </a>
+      <button className="button" disabled>
+        <Loader2 className="spin" size={17} />
+        Loading
+      </button>
     );
   }
 
-  if (status.account.demo) {
+  const sources = resolveSources(status);
+  const gmailConnected = sources.some(
+    (source) => source.entry.key === "gmail" && source.connected,
+  );
+
+  if (gmailConnected) {
     return (
       <button
         className="button primary"
-        onClick={() => demoMutation.mutate()}
-        disabled={demoMutation.isPending}
-        data-testid="topbar-reset-demo"
+        onClick={() => syncMutation.mutate()}
+        disabled={syncMutation.isPending}
+        data-testid="topbar-sync-gmail"
       >
-        {demoMutation.isPending ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
-        Reset demo
+        {syncMutation.isPending ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
+        Sync Gmail
       </button>
     );
   }
 
   return (
-    <button className="button primary" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
-      {syncMutation.isPending ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
-      Sync
+    <button
+      className="button primary"
+      onClick={() => demoMutation.mutate()}
+      disabled={demoMutation.isPending}
+      data-testid="topbar-sync-demo"
+    >
+      {demoMutation.isPending ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
+      Sync demo
     </button>
   );
 }
@@ -249,7 +295,9 @@ function Dashboard() {
         <h1>Today</h1>
       </section>
       <BriefingPanel briefing={home.data.briefing} />
-      {!statusData.account && <ConnectPanel missing={statusData.configMissing} />}
+      {!statusData.account && (
+        <ConnectPanel missing={[...statusData.configMissing, ...(statusData.securityMissing || [])]} />
+      )}
       <section className="surface flush">
         <div className="home-tabs" role="tablist" aria-label="Inbox views">
           {tabItems.map((item) => (
@@ -362,6 +410,16 @@ function ConnectPanel({ missing }: { missing: string[] }) {
       </a>
     </section>
   );
+}
+
+function oauthErrorMessage(error: string) {
+  if (error === "invalid_oauth_callback") {
+    return "Start from Connect Gmail instead of opening the callback route directly.";
+  }
+  if (error === "missing_google_config") {
+    return "Gmail OAuth is not configured yet. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, then restart the API.";
+  }
+  return error;
 }
 
 function Stat({ icon: Icon, label, value, testId }: { icon: typeof Mail; label: string; value: number; testId?: string }) {
@@ -547,13 +605,21 @@ function MessageDetailRoute() {
   );
 }
 
+const aiRunModeOptions: { id: AiRunMode; label: string; hint: string }[] = [
+  { id: "auto", label: "Auto", hint: "Use server default (iterative if a prior brief exists)" },
+  { id: "cold_start", label: "Cold start", hint: "Rebuild from all messages" },
+  { id: "iterative", label: "Iterative", hint: "Only messages newer than the last brief" },
+];
+
 function AiOpsRoute() {
+  const [runMode, setRunMode] = useState<AiRunMode>("auto");
+  const [runLimit, setRunLimit] = useState<number>(150);
   const query = useQuery({
     queryKey: queryKeys.aiControl,
     queryFn: getAiControl,
   });
   const runMutation = useMutation({
-    mutationFn: runAiLoop,
+    mutationFn: (options: { mode: AiRunMode; limit: number }) => runAiLoop(options),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.aiControl });
     },
@@ -583,12 +649,47 @@ function AiOpsRoute() {
         <div className="section-header">
           <div>
             <h2>Control loop</h2>
-            <p>Runs against the local mailbox with deterministic synthetic model output.</p>
+            <p>
+              Runs the briefing pipeline only — one LLM call to draft the brief from existing
+              decisions. Per-message classification and ranking run as separate batches.
+            </p>
           </div>
           <div className="toolbar">
+            <div className="ai-run-mode" role="group" aria-label="Run loop mode" data-testid="ai-run-mode">
+              {aiRunModeOptions.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={option.id === runMode ? "tab-button active" : "tab-button"}
+                  onClick={() => setRunMode(option.id)}
+                  disabled={runMutation.isPending}
+                  title={option.hint}
+                  aria-pressed={option.id === runMode}
+                  data-testid={`ai-run-mode-${option.id}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <label className="ai-run-limit" title="Max non-junk messages to include in the brief prompt">
+              <span className="ai-run-limit-label">Messages</span>
+              <input
+                type="number"
+                min={1}
+                max={500}
+                step={10}
+                value={runLimit}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  if (Number.isFinite(next) && next > 0) setRunLimit(Math.min(500, Math.floor(next)));
+                }}
+                disabled={runMutation.isPending}
+                data-testid="ai-run-limit"
+              />
+            </label>
             <button
               className="button primary"
-              onClick={() => runMutation.mutate()}
+              onClick={() => runMutation.mutate({ mode: runMode, limit: runLimit })}
               disabled={runMutation.isPending}
               data-testid="ai-run-loop"
             >
@@ -606,6 +707,11 @@ function AiOpsRoute() {
             </button>
           </div>
         </div>
+        {runMutation.isError ? (
+          <p className="ops-warn" data-testid="ai-run-error">
+            Run failed: {runMutation.error instanceof Error ? runMutation.error.message : String(runMutation.error)}
+          </p>
+        ) : null}
         <div className="ops-grid">
           <PhoenixSummary observability={observability} latestRun={latestRun} latestVerification={latestVerification} />
           <AiRunSummary run={latestRun} />
@@ -770,10 +876,76 @@ function VerificationCases({ run }: { run: AiVerificationRun }) {
   );
 }
 
+type SourceProviderKey = "synthetic-local-dev" | "gmail";
+
+type SourceCatalogEntry = {
+  key: SourceProviderKey;
+  provider: MailProvider;
+  label: string;
+  description: string;
+  icon: typeof Mail;
+  realConnection: boolean;
+  alwaysConnected?: boolean;
+};
+
+const SOURCE_CATALOG: SourceCatalogEntry[] = [
+  {
+    key: "synthetic-local-dev",
+    provider: "mock",
+    label: "Synthetic local dev",
+    description: "Built-in fixture mailbox used for development and demos.",
+    icon: Database,
+    realConnection: false,
+    alwaysConnected: true,
+  },
+  {
+    key: "gmail",
+    provider: "gmail",
+    label: "Gmail",
+    description: "Read-only Gmail import using the Google API.",
+    icon: Mail,
+    realConnection: true,
+  },
+];
+
+type ResolvedSource = {
+  entry: SourceCatalogEntry;
+  connected: boolean;
+  account: AccountSummary | null;
+  email: string;
+};
+
+function resolveSources(status: StatusResponse): ResolvedSource[] {
+  const account = status.account;
+  const accountIsDemo = Boolean(account?.demo) || account?.provider === "mock";
+
+  return SOURCE_CATALOG.map((entry) => {
+    if (entry.key === "synthetic-local-dev") {
+      return {
+        entry,
+        connected: true,
+        account: accountIsDemo ? account : null,
+        email: account && accountIsDemo ? account.email : "demo@example.com",
+      };
+    }
+    const matched = account && !accountIsDemo && account.provider === entry.provider ? account : null;
+    return {
+      entry,
+      connected: Boolean(matched),
+      account: matched,
+      email: matched?.email || "",
+    };
+  });
+}
+
 function SettingsRoute() {
   const status = useStatus();
-  const syncMutation = useMutation({
+  const syncGmailMutation = useMutation({
     mutationFn: syncGmail,
+    onSuccess: () => void queryClient.invalidateQueries(),
+  });
+  const syncMockMutation = useMutation({
+    mutationFn: syncMock,
     onSuccess: () => void queryClient.invalidateQueries(),
   });
   const disconnectMutation = useMutation({
@@ -786,68 +958,121 @@ function SettingsRoute() {
   });
   const params = new URLSearchParams(window.location.search);
   const oauthError = params.get("error");
-  const connected = params.get("connected");
+  const connectedQuery = params.get("connected");
 
   if (status.isError) return <ErrorPanel title="Could not load settings" error={status.error} />;
   if (status.isLoading || !status.data) return <Loading label="Loading settings" />;
   const statusData = status.data;
+  const sources = resolveSources(statusData);
+  const connectedSources = sources.filter((source) => source.connected);
+  const availableSources = sources.filter((source) => !source.connected && source.entry.realConnection);
+  const configMissing = [...statusData.configMissing, ...(statusData.securityMissing || [])];
 
   return (
     <div className="page-grid">
       <section className="page-heading">
         <h1>Settings</h1>
-        <p>Local app state and read-only Gmail connection.</p>
+        <p>Manage the sources that feed your mailbox. Connect additional providers to import more mail.</p>
       </section>
       {oauthError && (
         <section className="callout danger-callout">
           <AlertTriangle size={20} />
           <div>
             <h2>OAuth did not complete</h2>
-            <p>{oauthError === "invalid_oauth_callback" ? "Start from Connect Gmail instead of opening the callback route directly." : oauthError}</p>
+            <p>{oauthErrorMessage(oauthError)}</p>
           </div>
         </section>
       )}
-      {connected && (
+      {connectedQuery && (
         <section className="callout success-callout">
           <CheckCircle2 size={20} />
           <div>
             <h2>Connected</h2>
-            <p>{connected}</p>
+            <p>{connectedQuery}</p>
           </div>
         </section>
       )}
-      <section className="surface settings-surface">
-        <div>
-          <h2>Gmail</h2>
-          <p className="muted">{statusData.account?.email || "No Gmail account connected."}</p>
-          <p><span className="pill">read-only</span> {statusData.gmailReadonly}</p>
+
+      <section className="surface flush" data-testid="settings-sources">
+        <div className="section-header padded-header">
+          <div>
+            <h2>Sources</h2>
+            <p>{connectedSources.length} of {sources.length} sources connected.</p>
+          </div>
         </div>
-        <div className="settings-actions">
-          <a className="button primary" href="/api/connect/gmail" data-testid="settings-connect-gmail">
-            <Mail size={17} />
-            Connect Gmail
-          </a>
-          <button className="button" onClick={() => syncMutation.mutate()} disabled={!statusData.account || statusData.account.demo || syncMutation.isPending}>
-            {syncMutation.isPending ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
-            Sync
-          </button>
-          <button
-            className="button"
-            onClick={() => demoResetMutation.mutate()}
-            disabled={demoResetMutation.isPending}
-            data-testid="settings-reset-demo"
-          >
-            {demoResetMutation.isPending ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
-            Reset demo data
-          </button>
-          <button className="button danger-button" onClick={() => disconnectMutation.mutate()} disabled={disconnectMutation.isPending}>
-            <Trash2 size={17} />
-            Delete local data
-          </button>
+        <div className="source-list">
+          {sources.map((source) => (
+            <SourceConnectionCard
+              key={source.entry.key}
+              source={source}
+              gmailReadonly={statusData.gmailReadonly}
+              configMissing={configMissing}
+              syncGmailPending={syncGmailMutation.isPending}
+              syncMockPending={syncMockMutation.isPending}
+              disconnectPending={disconnectMutation.isPending}
+              demoResetPending={demoResetMutation.isPending}
+              onSyncGmail={() => syncGmailMutation.mutate()}
+              onSyncMock={() => syncMockMutation.mutate()}
+              onDisconnect={() => disconnectMutation.mutate()}
+              onResetDemo={() => demoResetMutation.mutate()}
+            />
+          ))}
         </div>
       </section>
+
+      {availableSources.length > 0 && (
+        <section className="surface" data-testid="settings-add-source">
+          <div className="section-header">
+            <div>
+              <h2>Add another source</h2>
+              <p>Bring more mail into SaneMail by connecting an additional provider.</p>
+            </div>
+          </div>
+          <div className="add-source-list">
+            {availableSources.map((source) => {
+              const Icon = source.entry.icon;
+              const blockedByConfig = source.entry.key === "gmail" && configMissing.length > 0;
+              return (
+                <div className="add-source-row" key={source.entry.key}>
+                  <div className="add-source-info">
+                    <span className="add-source-icon"><Icon size={18} /></span>
+                    <div>
+                      <strong>{source.entry.label}</strong>
+                      <span>{source.entry.description}</span>
+                    </div>
+                  </div>
+                  {source.entry.key === "gmail" ? (
+                    blockedByConfig ? (
+                      <span className="pill muted-pill" title={configMissing.join(", ")}>
+                        Needs config: {configMissing.join(", ")}
+                      </span>
+                    ) : (
+                      <a
+                        className="button primary"
+                        href="/api/connect/gmail"
+                        data-testid="settings-connect-gmail"
+                      >
+                        <Plus size={16} />
+                        Connect {source.entry.label}
+                      </a>
+                    )
+                  ) : (
+                    <span className="pill">Built-in</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       <section className="surface">
-        <h2>Local counts</h2>
+        <div className="section-header">
+          <div>
+            <h2>Local counts</h2>
+            <p>Aggregated across every connected source.</p>
+          </div>
+        </div>
         <div className="stats-grid compact">
           <Stat icon={Mail} label="Synced" value={statusData.counts.messages} testId="settings-stat-synced" />
           <Stat icon={CheckCircle2} label="Today" value={statusData.counts.today} />
@@ -855,7 +1080,180 @@ function SettingsRoute() {
           <Stat icon={ShieldAlert} label="Junk review" value={statusData.counts.junkReview} />
         </div>
       </section>
+
+      <section className="surface settings-surface" data-testid="settings-danger-zone">
+        <div>
+          <h2>Danger zone</h2>
+          <p className="muted">Clear every cached message and disconnect every source.</p>
+        </div>
+        <div className="settings-actions">
+          <button
+            className="button danger-button"
+            onClick={() => disconnectMutation.mutate()}
+            disabled={disconnectMutation.isPending}
+          >
+            {disconnectMutation.isPending ? <Loader2 className="spin" size={17} /> : <Trash2 size={17} />}
+            Delete local data
+          </button>
+        </div>
+      </section>
     </div>
+  );
+}
+
+function SourceConnectionCard({
+  source,
+  gmailReadonly,
+  configMissing,
+  syncGmailPending,
+  syncMockPending,
+  disconnectPending,
+  demoResetPending,
+  onSyncGmail,
+  onSyncMock,
+  onDisconnect,
+  onResetDemo,
+}: {
+  source: ResolvedSource;
+  gmailReadonly: string;
+  configMissing: string[];
+  syncGmailPending: boolean;
+  syncMockPending: boolean;
+  disconnectPending: boolean;
+  demoResetPending: boolean;
+  onSyncGmail: () => void;
+  onSyncMock: () => void;
+  onDisconnect: () => void;
+  onResetDemo: () => void;
+}) {
+  const Icon = source.entry.icon;
+  const isDev = source.entry.key === "synthetic-local-dev";
+  const isGmail = source.entry.key === "gmail";
+  const blockedByConfig = isGmail && configMissing.length > 0;
+
+  return (
+    <div
+      className={`source-card${source.connected ? " connected" : ""}${isDev ? " dev" : ""}`}
+      data-testid={`source-card-${source.entry.key}`}
+      data-connected={source.connected ? "true" : "false"}
+    >
+      <div className="source-card-head">
+        <span className="source-card-icon"><Icon size={20} /></span>
+        <div className="source-card-title">
+          <div className="source-card-title-row">
+            <strong>{source.entry.label}</strong>
+            <SourceStatusBadge connected={source.connected} alwaysConnected={source.entry.alwaysConnected} />
+          </div>
+          <span className="source-card-email">
+            {source.connected
+              ? source.email
+              : blockedByConfig
+                ? `Needs ${configMissing.join(", ")}`
+                : "Not connected"}
+          </span>
+        </div>
+      </div>
+      <p className="source-card-description">{source.entry.description}</p>
+      <div className="source-card-meta">
+        {isDev && <span className="pill">default</span>}
+        {isGmail && <span className="pill">read-only</span>}
+        {isGmail && <span className="muted">{gmailReadonly}</span>}
+        {source.account?.updatedAt && (
+          <span className="muted">updated {formatDate(source.account.updatedAt)}</span>
+        )}
+      </div>
+      <div className="source-card-actions">
+        {isDev && (
+          <>
+            <button
+              className="button"
+              onClick={onSyncMock}
+              disabled={syncMockPending}
+              data-testid="source-sync-dev"
+            >
+              {syncMockPending ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+              Sync
+            </button>
+            <button
+              className="button"
+              onClick={onResetDemo}
+              disabled={demoResetPending}
+              data-testid="settings-reset-demo"
+            >
+              {demoResetPending ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+              Reset demo data
+            </button>
+          </>
+        )}
+        {isGmail && source.connected && (
+          <>
+            <button
+              className="button"
+              onClick={onSyncGmail}
+              disabled={syncGmailPending}
+              data-testid="source-sync-gmail"
+            >
+              {syncGmailPending ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+              Sync
+            </button>
+            <button
+              className="button danger-button"
+              onClick={onDisconnect}
+              disabled={disconnectPending}
+              data-testid="source-disconnect-gmail"
+            >
+              <Trash2 size={16} />
+              Disconnect
+            </button>
+          </>
+        )}
+        {isGmail && !source.connected && (
+          blockedByConfig ? (
+            <span className="muted">Add Google credentials and restart the API to enable.</span>
+          ) : (
+            <a
+              className="button primary"
+              href="/api/connect/gmail"
+              data-testid="source-connect-gmail"
+            >
+              <Plug size={16} />
+              Connect
+            </a>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SourceStatusBadge({
+  connected,
+  alwaysConnected,
+}: {
+  connected: boolean;
+  alwaysConnected?: boolean;
+}) {
+  if (alwaysConnected) {
+    return (
+      <span className="status-badge connected" title="Default-connected for local dev">
+        <CheckCircle2 size={14} />
+        Connected
+      </span>
+    );
+  }
+  if (connected) {
+    return (
+      <span className="status-badge connected">
+        <CheckCircle2 size={14} />
+        Connected
+      </span>
+    );
+  }
+  return (
+    <span className="status-badge">
+      <Circle size={14} />
+      Not connected
+    </span>
   );
 }
 

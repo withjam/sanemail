@@ -4,13 +4,11 @@ import { access, stat } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { loadConfig, validateGoogleConfig } from "./config.mjs";
+import { loadConfig, validateGoogleConfig, validateSecurityConfig } from "./config.mjs";
 import {
   buildGoogleAuthUrl,
   exchangeCodeForTokens,
   getProfile,
-  refreshAccessToken,
-  syncRecentMessages,
 } from "./gmail.mjs";
 import {
   clearLocalData,
@@ -23,12 +21,14 @@ import {
   saveFeedback,
   saveOAuthState,
   upsertAccount,
-  upsertSyncedMessages,
 } from "./store.mjs";
 import { getClassifiedMessages } from "./classifier.mjs";
-import { enqueueJob, listQueueJobs } from "./queue.mjs";
+import { listQueueJobs } from "./queue.mjs";
 import { resetDemoData } from "./demo-data.mjs";
+import { syncSourceConnection } from "./source-sync.mjs";
+import { maybeEnqueuePostIngestClassification } from "./post-ingest-jobs.mjs";
 import { getPromptRecords } from "./ai/prompts.mjs";
+import { getAiEvalRecords } from "./ai/evals.mjs";
 import { buildInboxBriefing, runAiLoop } from "./ai/pipeline.mjs";
 import { runSyntheticVerification } from "./ai/verification.mjs";
 import { getPhoenixStatus } from "./ai/phoenix.mjs";
@@ -181,21 +181,6 @@ function publicAccount(account) {
   };
 }
 
-function accountNeedsRefresh(account) {
-  if (!account?.accessToken) return true;
-  if (!account.tokenExpiresAt) return false;
-  return new Date(account.tokenExpiresAt).getTime() - Date.now() < 60_000;
-}
-
-async function getFreshAccount() {
-  const account = await getPrimaryAccount();
-  if (!account) throw new Error("No Gmail account is connected.");
-  if (!accountNeedsRefresh(account)) return account;
-
-  const refreshed = await refreshAccessToken(config, account);
-  return upsertAccount(refreshed);
-}
-
 async function parseJsonBody(request) {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
@@ -212,6 +197,7 @@ async function routeStatus(response) {
   sendJson(response, {
     account: publicAccount(account),
     configMissing: validateGoogleConfig(config),
+    securityMissing: validateSecurityConfig(config),
     counts: {
       messages: messages.length,
       today: today.length,
@@ -308,19 +294,21 @@ async function routeFeedback(messageId, request, response) {
   sendJson(response, { ok: true });
 }
 
+async function regenerateBriefAfterSync(trigger) {
+  try {
+    const run = await runAiLoop({ trigger, mode: "cold_start" });
+    return { runId: run.id, briefingGenerated: Boolean(run.output?.briefing) };
+  } catch (error) {
+    console.error(`[sync] brief regeneration failed (${trigger}):`, error);
+    return { error: error.message || String(error) };
+  }
+}
+
 async function routeSyncGmail(response) {
-  const account = await getFreshAccount();
-  const messages = await syncRecentMessages(config, account);
-  const result = await upsertSyncedMessages(account, messages);
-  const queued = await enqueueJob("classification.batch", {
-    userId: account.id,
-    accountId: account.id,
-    classifierVersion: "local-json-v0",
-    reason: "post_ingest",
-    maxBatchSize: config.queue.classificationBatchSize,
-    requestedAt: new Date().toISOString(),
-  });
-  sendJson(response, { ok: true, result, queued });
+  const { account, result } = await syncSourceConnection({ provider: "gmail", trigger: "manual" });
+  const queued = await maybeEnqueuePostIngestClassification(account);
+  const briefRun = await regenerateBriefAfterSync("sync:gmail");
+  sendJson(response, { ok: true, result, briefRun, ...(queued ? { queued } : {}) });
 }
 
 async function routeDisconnect(response) {
@@ -333,12 +321,29 @@ async function routeDemoReset(response) {
   sendJson(response, { ok: true, account: publicAccount(account), result });
 }
 
+async function routeSyncMock(response) {
+  const { account, result } = await syncSourceConnection({
+    provider: "mock",
+    trigger: "manual",
+  });
+  const queued = await maybeEnqueuePostIngestClassification(account);
+  const briefRun = await regenerateBriefAfterSync("sync:mock");
+  sendJson(response, {
+    ok: true,
+    account: publicAccount(account),
+    result,
+    briefRun,
+    ...(queued ? { queued } : {}),
+  });
+}
+
 async function routeAiControl(response) {
   const runs = await listAiRuns(20);
   const verificationRuns = await listVerificationRuns(20);
   const queueJobs = await listQueueJobs(20);
   sendJson(response, {
     prompts: getPromptRecords(),
+    evals: getAiEvalRecords(),
     observability: getPhoenixStatus(),
     latestRun: runs[0] || null,
     runs,
@@ -458,6 +463,7 @@ async function handleApi(url, request, response) {
   if (request.method === "GET" && url.pathname === "/api/messages") return routeMessages(response);
   if (request.method === "GET" && url.pathname === "/api/today") return routeToday(response);
   if (request.method === "POST" && url.pathname === "/api/sync/gmail") return routeSyncGmail(response);
+  if (request.method === "POST" && url.pathname === "/api/sync/mock") return routeSyncMock(response);
   if (request.method === "POST" && url.pathname === "/api/disconnect") return routeDisconnect(response);
   if (request.method === "POST" && url.pathname === "/api/demo/reset") return routeDemoReset(response);
   if (request.method === "GET" && url.pathname === "/api/ai/control") return routeAiControl(response);

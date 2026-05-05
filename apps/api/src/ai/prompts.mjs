@@ -197,21 +197,69 @@ export function promptHash(prompt) {
   return hashValue({
     id: prompt.id,
     version: prompt.version,
+    variables: prompt.variables,
     system: prompt.system,
     userTemplate: prompt.userTemplate,
     responseSchema: prompt.responseSchema,
   });
 }
 
-export function getPromptRecords() {
-  return promptDefinitions.map((prompt) => ({
-    ...prompt,
-    hash: promptHash(prompt),
-  }));
+function overrideFor(prompt, modelOverrides = {}) {
+  return {
+    ...(modelOverrides["*"] || modelOverrides.default || {}),
+    ...(modelOverrides[prompt.id] || {}),
+  };
 }
 
-export function getPromptSnapshots() {
-  return getPromptRecords().map((prompt) => ({
+export function modelBindingForPrompt(prompt, override = {}) {
+  const binding = {
+    provider: override.provider || prompt.provider,
+    model: override.model || prompt.model,
+    temperature: Number(override.temperature ?? prompt.temperature ?? 0),
+  };
+
+  if (override.think !== undefined) binding.think = override.think;
+  else if (prompt.think !== undefined) binding.think = prompt.think;
+
+  return binding;
+}
+
+export function modelBindingHash(prompt, override = {}) {
+  return hashValue(modelBindingForPrompt(prompt, override));
+}
+
+export function promptContractHash(prompt, override = {}) {
+  const promptContentHash = promptHash(prompt);
+  return hashValue({
+    id: prompt.id,
+    version: prompt.version,
+    stage: prompt.stage,
+    promptHash: promptContentHash,
+    modelBinding: modelBindingForPrompt(prompt, override),
+    responseSchema: prompt.responseSchema,
+  });
+}
+
+function promptRecord(prompt, override = {}) {
+  const binding = modelBindingForPrompt(prompt, override);
+  const contentHash = promptHash(prompt);
+
+  return {
+    ...prompt,
+    ...binding,
+    hash: contentHash,
+    promptHash: contentHash,
+    modelBindingHash: modelBindingHash(prompt, override),
+    contractHash: promptContractHash(prompt, override),
+  };
+}
+
+export function getPromptRecords(modelOverrides = {}) {
+  return promptDefinitions.map((prompt) => promptRecord(prompt, overrideFor(prompt, modelOverrides)));
+}
+
+export function getPromptSnapshots(modelOverrides = {}) {
+  return getPromptRecords(modelOverrides).map((prompt) => ({
     id: prompt.id,
     version: prompt.version,
     stage: prompt.stage,
@@ -220,6 +268,9 @@ export function getPromptSnapshots() {
     model: prompt.model,
     temperature: prompt.temperature,
     hash: prompt.hash,
+    promptHash: prompt.promptHash,
+    modelBindingHash: prompt.modelBindingHash,
+    contractHash: prompt.contractHash,
   }));
 }
 
@@ -229,7 +280,7 @@ export function getPromptById(id) {
   return prompt;
 }
 
-export function renderPrompt(id, variables = {}) {
+export function renderPrompt(id, variables = {}, modelOverride = {}) {
   const prompt = getPromptById(id);
   const renderedUser = prompt.userTemplate.replace(/\{\{(\w+)\}\}/g, (_match, key) => {
     const value = variables[key];
@@ -243,6 +294,9 @@ export function renderPrompt(id, variables = {}) {
     id: prompt.id,
     version: prompt.version,
     hash: promptHash(prompt),
+    promptHash: promptHash(prompt),
+    modelBindingHash: modelBindingHash(prompt, modelOverride),
+    contractHash: promptContractHash(prompt, modelOverride),
     system: prompt.system,
     user: renderedUser,
   };

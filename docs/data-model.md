@@ -6,8 +6,10 @@ production database. The production model should be source-agnostic at the mail
 layer and source-specific only at the connector boundary.
 
 The initial Postgres baseline lives in
-`migrations/committed/000001-initial-app-schema.sql` and is managed by Graphile
-Migrate. Use `migrations/current.sql` for the next in-progress schema change.
+`migrations/committed/000001-initial-app-schema.sql`, with encrypted local app
+storage additions in `000002-secure-app-storage-tables.sql`. Both are managed by
+Graphile Migrate. Use `migrations/current.sql` for the next in-progress schema
+change.
 
 The core rule is:
 
@@ -59,14 +61,14 @@ Important fields:
 ### Source Connections
 
 Represents one connected mailbox or delivery source for a user. A user may have
-many source connections, such as personal Gmail, work Gmail, Outlook, IMAP, or a
-future SaneMail-hosted MX mailbox.
+many source connections, such as personal Gmail, work Gmail, Outlook, IMAP, a
+local `mock` source, or a future SaneMail-hosted MX mailbox.
 
 Important fields:
 
 - `id`: stable SaneMail source connection id.
 - `user_id`: owner.
-- `provider`: `gmail`, `outlook`, `imap`, `mx`, or another connector id.
+- `provider`: `gmail`, `outlook`, `imap`, `mx`, `mock`, or another connector id.
 - `source_email`: mailbox/account address at the source.
 - `display_name`: user-facing source name.
 - `status`: `active`, `paused`, `reauth_required`, `sync_error`, `deleted`.
@@ -542,6 +544,12 @@ The ingestion worker should not:
 
 Demo accounts may include `demo: true` so the UI can show local-only demo
 actions instead of trying to sync Gmail.
+
+The current MVP keeps source sync manual: `/api/sync/gmail` and
+`/api/sync/mock` call the shared source-sync path directly, and the worker can
+process the same path through a manually enqueued `source.sync` job. Automatic
+post-ingest classification or brief jobs remain disabled unless
+`QUEUE_AUTO_POST_INGEST_JOBS=true`.
 
 ## Demo Data
 

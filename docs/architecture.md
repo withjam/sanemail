@@ -304,6 +304,10 @@ Expose a product API for the new experience and maintain compatibility surfaces.
 
 ## Near-Real-Time Event Flow
 
+This is the target production flow. The current MVP keeps source sync manual and
+leaves automatic post-ingest classification/brief queue chaining disabled unless
+`QUEUE_AUTO_POST_INGEST_JOBS=true`.
+
 ```mermaid
 sequenceDiagram
     participant Source as Gmail Connector / MX Edge
@@ -315,8 +319,9 @@ sequenceDiagram
     participant View as View Store
     participant App as Web/Mobile
 
-    Source->>Raw: persist raw/source payload
-    Source->>Queue: enqueue classification.batch
+    Source->>Queue: enqueue source.sync
+    Queue->>Raw: persist raw/source payload
+    Raw->>Queue: enqueue classification.batch
     Queue->>Trust: authenticate and score risk
     Trust->>View: visible in All Mail
     Trust->>Queue: enqueue understanding batch

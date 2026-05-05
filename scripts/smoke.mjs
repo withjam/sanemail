@@ -106,7 +106,6 @@ const env = {
   PORT: String(port),
   HOST: "127.0.0.1",
   APP_ORIGIN: origin,
-  AI_PROVIDER: "mock",
   PHOENIX_ENABLED: "false",
 };
 
@@ -124,6 +123,17 @@ try {
   await expectJson(origin, "/api/status", (payload) => {
     if (payload.counts.messages !== expectedDemoMessages) {
       throw new Error(`Expected ${expectedDemoMessages} synced messages; got ${payload.counts.messages}`);
+    }
+    if (payload.account?.provider !== "mock") {
+      throw new Error(`Expected seeded mailbox to use the mock source; got ${payload.account?.provider}`);
+    }
+  });
+  await postJson(origin, "/api/sync/mock", {}, (payload) => {
+    if (payload.result.count !== expectedDemoMessages) {
+      throw new Error(`Expected mock sync to process ${expectedDemoMessages} messages; got ${payload.result.count}`);
+    }
+    if (payload.account?.provider !== "mock") {
+      throw new Error("Mock sync did not return a mock source account.");
     }
   });
   await expectJson(origin, "/api/messages", (payload) => {
@@ -167,12 +177,15 @@ try {
     if (!payload.prompts.some((prompt) => prompt.id === "mail-classification-batch")) {
       throw new Error("AI control did not expose the batch classification prompt.");
     }
-  });
-  await postJson(origin, "/api/ai/run", {}, (payload) => {
-    if (payload.run.metrics.messagesProcessed !== expectedDemoMessages) {
-      throw new Error(`Expected ${expectedDemoMessages} AI decisions; got ${payload.run.metrics.messagesProcessed}`);
+    if (!payload.prompts.every((prompt) => prompt.contractHash && prompt.modelBindingHash)) {
+      throw new Error("AI control did not expose model-bound prompt contracts.");
+    }
+    if (!payload.evals?.some((evalRecord) => evalRecord.promptIds.includes("mail-classification-batch"))) {
+      throw new Error("AI control did not expose eval coverage for batch classification.");
     }
   });
+  // /api/ai/run is skipped in smoke: it requires a reachable Ollama host.
+  // Local /api/ai/verify uses the deterministic in-process pipeline and stays in scope.
   await postJson(origin, "/api/ai/verify", {}, (payload) => {
     if (payload.run.status !== "passed") {
       throw new Error(`Expected AI verification to pass; got ${payload.run.status}`);

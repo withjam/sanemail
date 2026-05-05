@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { buildDemoMessages } from "../demo-data.mjs";
 import { saveVerificationRun } from "../store.mjs";
+import { evaluatePromptContractCoverage, getAiEvalRecords } from "./evals.mjs";
 import {
   evaluateGoldenPromptRecords,
   getGoldenPreviousBriefing,
@@ -139,6 +140,7 @@ export function getVerificationSuite() {
   return {
     ...suite,
     goldenRecords: getGoldenPromptRecords(),
+    evalRecords: getAiEvalRecords(),
   };
 }
 
@@ -171,6 +173,7 @@ export async function runSyntheticVerification({ persist = false } = {}) {
   const cases = [
     ...suite.cases.map((testCase) => evaluateCase(testCase, decisionsById.get(testCase.messageId))),
     ...evaluateGoldenPromptRecords(aiRun, { carryOverRun }),
+    ...evaluatePromptContractCoverage(aiRun.promptRefs),
   ];
   const checks = cases.flatMap((testCase) => testCase.checks);
   const passedChecks = checks.filter((check) => check.passed).length;

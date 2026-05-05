@@ -3,6 +3,8 @@ import { run, runOnce } from "graphile-worker";
 import { loadConfig } from "./config.mjs";
 import { claimNextJob, completeJob, failJob } from "./queue.mjs";
 import { runAiLoop } from "./ai/pipeline.mjs";
+import { syncSourceConnection } from "./source-sync.mjs";
+import { maybeEnqueuePostIngestClassification } from "./post-ingest-jobs.mjs";
 
 const jobNames = [
   "source.sync",
@@ -20,6 +22,7 @@ async function handleClassificationBatch(job) {
   const run = await runAiLoop({
     limit: payload.maxBatchSize,
     mode: "iterative",
+    briefingOnly: false,
     trigger: "queue:classification.batch",
   });
 
@@ -31,11 +34,22 @@ async function handleClassificationBatch(job) {
 }
 
 async function handleSourceSync(job) {
+  const payload = job.payload || {};
+  const { account, result, provider, trigger } = await syncSourceConnection({
+    sourceConnectionId: payload.sourceConnectionId,
+    accountId: payload.accountId,
+    provider: payload.provider,
+    trigger: payload.trigger || "manual",
+  });
+  const queued = await maybeEnqueuePostIngestClassification(account);
+
   return {
-    status: "deferred",
-    reason:
-      "Source sync jobs need the durable connector tables; current Gmail sync still runs through the API endpoint.",
-    sourceConnectionId: job.payload?.sourceConnectionId || job.payload?.accountId || null,
+    status: "synced",
+    sourceConnectionId: account.id,
+    provider,
+    trigger,
+    result,
+    ...(queued ? { queued } : {}),
   };
 }
 
@@ -43,6 +57,7 @@ async function handleBriefGenerate(job) {
   const payload = job.payload || {};
   const run = await runAiLoop({
     mode: "iterative",
+    briefingOnly: true,
     trigger: `queue:brief.generate:${payload.scopeType || "all_sources"}`,
   });
 
@@ -72,16 +87,16 @@ export async function handleJob(job) {
 function graphileTaskList() {
   return {
     source_sync: async (payload) => {
-      await handleSourceSync({ name: "source.sync", payload });
+      return handleSourceSync({ name: "source.sync", payload });
     },
     classification_batch: async (payload) => {
-      await handleClassificationBatch({ name: "classification.batch", payload });
+      return handleClassificationBatch({ name: "classification.batch", payload });
     },
     brief_generate: async (payload) => {
-      await handleBriefGenerate({ name: "brief.generate", payload });
+      return handleBriefGenerate({ name: "brief.generate", payload });
     },
     message_types_discover: async (payload) => {
-      await handleMessageTypesDiscover({ name: "message-types.discover", payload });
+      return handleMessageTypesDiscover({ name: "message-types.discover", payload });
     },
   };
 }

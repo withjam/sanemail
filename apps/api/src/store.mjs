@@ -1,9 +1,24 @@
 import crypto from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { loadConfig } from "./config.mjs";
+import { decryptJson, encryptJson } from "./security.mjs";
 
 const dataDir = process.env.DATA_DIR || path.join(process.cwd(), "data");
 const storePath = path.join(dataDir, "sanemail.json");
+
+let postgresStorePromise;
+
+function usePostgresStore() {
+  return loadConfig().storage.driver === "postgres";
+}
+
+async function postgresStore() {
+  if (!postgresStorePromise) {
+    postgresStorePromise = import("./postgres-store.mjs");
+  }
+  return postgresStorePromise;
+}
 
 function emptyStore() {
   return {
@@ -25,7 +40,56 @@ async function ensureDataDir() {
   await mkdir(dataDir, { recursive: true });
 }
 
-export async function readStore() {
+function decryptAccountSecrets(account) {
+  if (!account?.authEncrypted) return account;
+
+  const tokens = decryptJson(account.authEncrypted, { purpose: "oauth_tokens" }) || {};
+  return {
+    ...account,
+    accessToken: tokens.accessToken || "",
+    refreshToken: tokens.refreshToken || "",
+    tokenExpiresAt: tokens.tokenExpiresAt || account.tokenExpiresAt || "",
+  };
+}
+
+function encryptAccountSecrets(account) {
+  if (!account) return account;
+
+  const { accessToken, refreshToken, ...rest } = account;
+  const hasTokenFields = accessToken !== undefined || refreshToken !== undefined;
+
+  if (!hasTokenFields) return rest;
+
+  const tokenExpiresAt = account.tokenExpiresAt || rest.tokenExpiresAt || "";
+  return {
+    ...rest,
+    tokenExpiresAt,
+    authEncrypted: encryptJson(
+      {
+        accessToken: accessToken || "",
+        refreshToken: refreshToken || "",
+        tokenExpiresAt,
+      },
+      { purpose: "oauth_tokens" },
+    ),
+  };
+}
+
+function hydrateStoreSecrets(store) {
+  return {
+    ...store,
+    accounts: (store.accounts || []).map(decryptAccountSecrets),
+  };
+}
+
+function sealStoreSecrets(store) {
+  return {
+    ...store,
+    accounts: (store.accounts || []).map(encryptAccountSecrets),
+  };
+}
+
+async function readJsonStoreRaw() {
   await ensureDataDir();
 
   try {
@@ -37,10 +101,18 @@ export async function readStore() {
   }
 }
 
+export async function readStore() {
+  if (usePostgresStore()) return (await postgresStore()).readStore();
+  return hydrateStoreSecrets(await readJsonStoreRaw());
+}
+
 export async function writeStore(store) {
+  if (usePostgresStore()) {
+    throw new Error("writeStore is not available with STORE_DRIVER=postgres.");
+  }
   await ensureDataDir();
   const tmpPath = `${storePath}.${crypto.randomUUID()}.tmp`;
-  await writeFile(tmpPath, `${JSON.stringify(store, null, 2)}\n`);
+  await writeFile(tmpPath, `${JSON.stringify(sealStoreSecrets(store), null, 2)}\n`);
   await rename(tmpPath, storePath);
 }
 
@@ -52,6 +124,7 @@ export async function mutateStore(mutator) {
 }
 
 export async function saveOAuthState(state) {
+  if (usePostgresStore()) return (await postgresStore()).saveOAuthState(state);
   return mutateStore((store) => {
     store.oauthStates = store.oauthStates.filter(
       (entry) => Date.now() - entry.createdAt < 10 * 60 * 1000,
@@ -61,6 +134,7 @@ export async function saveOAuthState(state) {
 }
 
 export async function consumeOAuthState(state) {
+  if (usePostgresStore()) return (await postgresStore()).consumeOAuthState(state);
   return mutateStore((store) => {
     const found = store.oauthStates.some((entry) => entry.state === state);
     store.oauthStates = store.oauthStates.filter((entry) => entry.state !== state);
@@ -69,6 +143,7 @@ export async function consumeOAuthState(state) {
 }
 
 export async function upsertAccount(account) {
+  if (usePostgresStore()) return (await postgresStore()).upsertAccount(account);
   return mutateStore((store) => {
     const index = store.accounts.findIndex((item) => item.id === account.id);
     const existing = index >= 0 ? store.accounts[index] : {};
@@ -86,11 +161,13 @@ export async function upsertAccount(account) {
 }
 
 export async function getPrimaryAccount() {
+  if (usePostgresStore()) return (await postgresStore()).getPrimaryAccount();
   const store = await readStore();
   return store.accounts[0] || null;
 }
 
 export async function upsertSyncedMessages(account, messages) {
+  if (usePostgresStore()) return (await postgresStore()).upsertSyncedMessages(account, messages);
   return mutateStore((store) => {
     let inserted = 0;
     let updated = 0;
@@ -154,6 +231,7 @@ export async function upsertSyncedMessages(account, messages) {
 }
 
 export async function saveFeedback(messageId, kind) {
+  if (usePostgresStore()) return (await postgresStore()).saveFeedback(messageId, kind);
   return mutateStore((store) => {
     store.feedback.push({
       id: crypto.randomUUID(),
@@ -165,6 +243,7 @@ export async function saveFeedback(messageId, kind) {
 }
 
 export async function recordAiRun(run) {
+  if (usePostgresStore()) return (await postgresStore()).recordAiRun(run);
   return mutateStore((store) => {
     store.aiRuns = [
       run,
@@ -210,6 +289,7 @@ export function latestInboxBriefing(store, accountId) {
 }
 
 export async function listAiRuns(limit = 50) {
+  if (usePostgresStore()) return (await postgresStore()).listAiRuns(limit);
   const store = await readStore();
   return [...store.aiRuns]
     .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
@@ -217,6 +297,7 @@ export async function listAiRuns(limit = 50) {
 }
 
 export async function saveVerificationRun(run) {
+  if (usePostgresStore()) return (await postgresStore()).saveVerificationRun(run);
   return mutateStore((store) => {
     store.verificationRuns = [
       run,
@@ -235,6 +316,7 @@ export async function saveVerificationRun(run) {
 }
 
 export async function listVerificationRuns(limit = 50) {
+  if (usePostgresStore()) return (await postgresStore()).listVerificationRuns(limit);
   const store = await readStore();
   return [...store.verificationRuns]
     .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
@@ -242,5 +324,6 @@ export async function listVerificationRuns(limit = 50) {
 }
 
 export async function clearLocalData() {
+  if (usePostgresStore()) return (await postgresStore()).clearLocalData();
   await writeStore(emptyStore());
 }

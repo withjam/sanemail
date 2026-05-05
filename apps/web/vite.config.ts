@@ -28,6 +28,7 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: "/index.html",
+        navigateFallbackDenylist: [/^\/api\//, /^\/connect\//, /^\/oauth\//],
         globPatterns: ["**/*.{js,css,html,svg,png,ico,txt,json}"],
         runtimeCaching: [
           {

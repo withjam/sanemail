@@ -68,6 +68,13 @@ export function syncGmail() {
   });
 }
 
+export function syncMock() {
+  return apiFetch<DemoResetResponse>("/api/sync/mock", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 export function disconnect() {
   return apiFetch<{ ok: true }>("/api/disconnect", {
     method: "POST",
@@ -86,10 +93,20 @@ export function getAiControl() {
   return apiFetch<AiControlResponse>("/api/ai/control");
 }
 
-export function runAiLoop() {
+export type AiRunMode = "auto" | "cold_start" | "iterative";
+
+export interface RunAiLoopOptions {
+  mode?: AiRunMode;
+  limit?: number;
+}
+
+export function runAiLoop({ mode = "auto", limit }: RunAiLoopOptions = {}) {
+  const body: { mode?: AiRunMode; limit?: number } = {};
+  if (mode !== "auto") body.mode = mode;
+  if (typeof limit === "number" && Number.isFinite(limit) && limit > 0) body.limit = limit;
   return apiFetch<AiRunResponse>("/api/ai/run", {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify(body),
   });
 }
 

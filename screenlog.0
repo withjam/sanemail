@@ -29,3 +29,527 @@ $ vite --host "127.0.0.1" --port "5173"
   ➜  Local:   http://127.0.0.1:5173/
   ➜  press h + enter to show help
 SaneMail API running at http://127.0.0.1:3000
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J9:42:35 PM [vite] (client) hmr update /src/router.tsx
+9:42:35 PM [vite] (client) hmr invalidate /src/router.tsx Could not Fast Refresh ("router" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+9:42:35 PM [vite] (client) page reload src/router.tsx
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J9:42:39 PM [vite] (client) hmr update /src/router.tsx
+9:42:39 PM [vite] (client) hmr invalidate /src/router.tsx Could not Fast Refresh ("router" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+9:42:39 PM [vite] (client) page reload src/router.tsx
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J9:43:29 PM [vite] (client) hmr update /src/router.tsx
+9:43:29 PM [vite] (client) hmr invalidate /src/router.tsx Could not Fast Refresh ("router" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+9:43:29 PM [vite] (client) page reload src/router.tsx
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J9:43:38 PM [vite] (client) hmr update /src/router.tsx
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J9:43:38 PM [vite] Internal server error: /Users/ruckus/workspace/sanemail/apps/web/src/router.tsx: Adjacent JSX elements must be wrapped in an enclosing tag. Did you want a JSX fragment <>...</>? (212:6)
+
+  210 |       </Link>
+  211 |         </div>
+> 212 |       </aside>
+      |       ^
+  213 |       <div className="main-column">
+  214 |         <header className="topbar">
+  215 |           <div>
+  Plugin: vite:react-babel
+  File: /Users/ruckus/workspace/sanemail/apps/web/src/router.tsx:212:6
+  210 |        </Link>
+  211 |          </div>
+  212 |        </aside>
+      |        ^
+  213 |        <div className="main-column">
+  214 |          <header className="topbar">
+      at constructor (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:365:19)
+      at TypeScriptParserMixin.raise (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:6616:19)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:4754:18)
+      at TypeScriptParserMixin.jsxParseElement (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:4761:17)
+      at TypeScriptParserMixin.parseExprAtom (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:4771:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11098:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11083:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11063:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9854:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10916:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10921:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10898:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10848:21)
+      at /Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9792:39
+      at TypeScriptParserMixin.tryParse (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:6924:20)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9792:18)
+      at /Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10817:39
+      at TypeScriptParserMixin.allowInAnd (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12443:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10817:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12510:17)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11692:28)
+      at TypeScriptParserMixin.parseExprAtom (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11348:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:4776:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11098:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11083:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11063:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9854:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10916:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10921:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10898:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10848:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9803:20)
+      at TypeScriptParserMixin.parseExpressionBase (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10801:23)
+      at /Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10797:39
+      at TypeScriptParserMixin.allowInAnd (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12438:16)
+      at TypeScriptParserMixin.parseExpression (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10797:17)
+      at TypeScriptParserMixin.parseReturnStatement (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:13159:28)
+      at TypeScriptParserMixin.parseStatementContent (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12815:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9525:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12784:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12764:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:13333:61)
+      at TypeScriptParserMixin.parseBlockBody (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:13326:10)
+      at TypeScriptParserMixin.parseBlock (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:13314:10)
+      at TypeScriptParserMixin.parseFunctionBody (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12117:24)
+      at TypeScriptParserMixin.parseFunctionBodyAndFinish (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12103:10)
+      at TypeScriptParserMixin.parseFunctionBodyAndFinish (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9189:18)
+      at /Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:13462:12
+      at TypeScriptParserMixin.withSmartMixTopicForbiddingContext (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12420:14)
+      at TypeScriptParserMixin.parseFunction (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:13461:10)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J9:43:38 PM [vite] Internal server error: /Users/ruckus/workspace/sanemail/apps/web/src/router.tsx: Adjacent JSX elements must be wrapped in an enclosing tag. Did you want a JSX fragment <>...</>? (212:6)
+
+  210 |       </Link>
+  211 |         </div>
+> 212 |       </aside>
+      |       ^
+  213 |       <div className="main-column">
+  214 |         <header className="topbar">
+  215 |           <div>
+  Plugin: vite:react-babel
+  File: /Users/ruckus/workspace/sanemail/apps/web/src/router.tsx:212:6
+  210 |        </Link>
+  211 |          </div>
+  212 |        </aside>
+      |        ^
+  213 |        <div className="main-column">
+  214 |          <header className="topbar">
+      at constructor (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:365:19)
+      at TypeScriptParserMixin.raise (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:6616:19)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:4754:18)
+      at TypeScriptParserMixin.jsxParseElement (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:4761:17)
+      at TypeScriptParserMixin.parseExprAtom (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:4771:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11098:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11083:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11063:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9854:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10916:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10921:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10898:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10848:21)
+      at /Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9792:39
+      at TypeScriptParserMixin.tryParse (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:6924:20)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9792:18)
+      at /Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10817:39
+      at TypeScriptParserMixin.allowInAnd (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12443:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10817:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12510:17)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11692:28)
+      at TypeScriptParserMixin.parseExprAtom (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11348:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:4776:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11098:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11083:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11063:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9854:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10916:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10921:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10898:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10848:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9803:20)
+      at TypeScriptParserMixin.parseExpressionBase (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10801:23)
+      at /Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10797:39
+      at TypeScriptParserMixin.allowInAnd (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12438:16)
+      at TypeScriptParserMixin.parseExpression (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10797:17)
+      at TypeScriptParserMixin.parseReturnStatement (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:13159:28)
+      at TypeScriptParserMixin.parseStatementContent (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12815:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9525:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12784:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12764:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:13333:61)
+      at TypeScriptParserMixin.parseBlockBody (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:13326:10)
+      at TypeScriptParserMixin.parseBlock (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:13314:10)
+      at TypeScriptParserMixin.parseFunctionBody (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12117:24)
+      at TypeScriptParserMixin.parseFunctionBodyAndFinish (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12103:10)
+      at TypeScriptParserMixin.parseFunctionBodyAndFinish (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9189:18)
+      at /Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:13462:12
+      at TypeScriptParserMixin.withSmartMixTopicForbiddingContext (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12420:14)
+      at TypeScriptParserMixin.parseFunction (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:13461:10) (x2)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J9:43:38 PM [vite] Internal server error: /Users/ruckus/workspace/sanemail/apps/web/src/router.tsx: Adjacent JSX elements must be wrapped in an enclosing tag. Did you want a JSX fragment <>...</>? (212:6)
+
+  210 |       </Link>
+  211 |         </div>
+> 212 |       </aside>
+      |       ^
+  213 |       <div className="main-column">
+  214 |         <header className="topbar">
+  215 |           <div>
+  Plugin: vite:react-babel
+  File: /Users/ruckus/workspace/sanemail/apps/web/src/router.tsx:212:6
+  210 |        </Link>
+  211 |          </div>
+  212 |        </aside>
+      |        ^
+  213 |        <div className="main-column">
+  214 |          <header className="topbar">
+      at constructor (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:365:19)
+      at TypeScriptParserMixin.raise (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:6616:19)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:4754:18)
+      at TypeScriptParserMixin.jsxParseElement (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:4761:17)
+      at TypeScriptParserMixin.parseExprAtom (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:4771:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11098:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11083:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11063:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9854:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10916:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10921:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10898:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10848:21)
+      at /Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9792:39
+      at TypeScriptParserMixin.tryParse (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:6924:20)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9792:18)
+      at /Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10817:39
+      at TypeScriptParserMixin.allowInAnd (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12443:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10817:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12510:17)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11692:28)
+      at TypeScriptParserMixin.parseExprAtom (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11348:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:4776:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11098:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11083:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:11063:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9854:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10916:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10921:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10898:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10848:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9803:20)
+      at TypeScriptParserMixin.parseExpressionBase (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10801:23)
+      at /Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10797:39
+      at TypeScriptParserMixin.allowInAnd (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12438:16)
+      at TypeScriptParserMixin.parseExpression (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:10797:17)
+      at TypeScriptParserMixin.parseReturnStatement (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:13159:28)
+      at TypeScriptParserMixin.parseStatementContent (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12815:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9525:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12784:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12764:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:13333:61)
+      at TypeScriptParserMixin.parseBlockBody (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:13326:10)
+      at TypeScriptParserMixin.parseBlock (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:13314:10)
+      at TypeScriptParserMixin.parseFunctionBody (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12117:24)
+      at TypeScriptParserMixin.parseFunctionBodyAndFinish (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12103:10)
+      at TypeScriptParserMixin.parseFunctionBodyAndFinish (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:9189:18)
+      at /Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:13462:12
+      at TypeScriptParserMixin.withSmartMixTopicForbiddingContext (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:12420:14)
+      at TypeScriptParserMixin.parseFunction (/Users/ruckus/workspace/sanemail/node_modules/.bun/@babel+parser@7.29.3/node_modules/@babel/parser/lib/index.js:13461:10) (x3)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J9:44:02 PM [vite] (client) hmr update /src/router.tsx
+9:44:02 PM [vite] (client) hmr invalidate /src/router.tsx Could not Fast Refresh ("router" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+9:44:02 PM [vite] (client) page reload src/router.tsx
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J9:44:15 PM [vite] (client) hmr update /src/router.tsx
+9:44:15 PM [vite] (client) hmr invalidate /src/router.tsx Could not Fast Refresh ("router" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+9:44:15 PM [vite] (client) page reload src/router.tsx
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J9:44:43 PM [vite] (client) hmr update /src/styles.css
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J9:44:57 PM [vite] (client) hmr update /src/styles.css (x2)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J9:45:11 PM [vite] (client) hmr update /src/styles.css (x3)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J9:46:18 PM [vite] (client) hmr update /src/router.tsx
+9:46:18 PM [vite] (client) hmr invalidate /src/router.tsx Could not Fast Refresh ("router" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+9:46:18 PM [vite] (client) page reload src/router.tsx
+error: script "dev" exited with code 143
+error: script "dev" exited with code 143

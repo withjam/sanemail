@@ -1,6 +1,6 @@
 export type SaneCategory = "Today" | "Needs Reply" | "FYI" | "Junk Review" | "All Mail";
 
-export type MailProvider = "gmail" | "outlook" | "imap" | "mx";
+export type MailProvider = "gmail" | "outlook" | "imap" | "mx" | "mock";
 
 export type MessageTypeKind =
   | "system_seed"
@@ -25,6 +25,7 @@ export type QueueJobName =
 export type SourceSyncJobPayload = {
   sourceConnectionId: string;
   userId: string;
+  provider?: MailProvider;
   trigger: "watch" | "poll" | "manual" | "backfill" | "recovery";
   cursorHint?: string;
   requestedAt: string;
@@ -226,6 +227,7 @@ export type AccountSummary = {
 export type StatusResponse = {
   account: AccountSummary | null;
   configMissing: string[];
+  securityMissing?: string[];
   counts: {
     messages: number;
     today: number;
@@ -283,6 +285,9 @@ export type AiPromptRecord = {
   system: string;
   userTemplate: string;
   hash: string;
+  promptHash: string;
+  modelBindingHash: string;
+  contractHash: string;
 };
 
 export type AiPromptRef = {
@@ -293,6 +298,18 @@ export type AiPromptRef = {
   provider: string;
   model: string;
   temperature: number;
+  hash: string;
+  promptHash: string;
+  modelBindingHash: string;
+  contractHash: string;
+};
+
+export type AiEvalRecord = {
+  id: string;
+  promptIds: string[];
+  title: string;
+  evaluator: string;
+  checks: string[];
   hash: string;
 };
 
@@ -368,6 +385,9 @@ export type InboxBriefing = {
     id: string;
     version: string;
     hash: string;
+    promptHash?: string;
+    modelBindingHash?: string;
+    contractHash?: string;
   };
   counts: {
     visible: number;
@@ -433,10 +453,7 @@ export type AiRun = {
     temperature: number;
     think?: string | boolean;
     host?: string;
-    requestedProvider?: string;
-    requestedModel?: string;
-    fallbackToMock?: boolean;
-    fallbackErrors?: Array<{ messageId: string; error: string }>;
+    classifyMessages?: boolean;
   };
   promptRefs: AiPromptRef[];
   input: {
@@ -518,6 +535,8 @@ export type AiVerificationRun = {
       actual: unknown;
       passed: boolean;
     }>;
+    promptId?: string;
+    evalIds?: string[];
   }>;
   metrics: {
     latencyMs: number;
@@ -532,6 +551,7 @@ export type AiVerificationRun = {
 
 export type AiControlResponse = {
   prompts: AiPromptRecord[];
+  evals: AiEvalRecord[];
   observability: PhoenixObservabilityStatus;
   latestRun: AiRun | null;
   runs: AiRun[];

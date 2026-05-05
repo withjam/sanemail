@@ -28,8 +28,6 @@ debugLog("resolved configuration", {
     present: existsSync(path.join(process.cwd(), ".env")),
   },
   ai: {
-    provider: config.ai.provider,
-    fallbackToMock: config.ai.fallbackToMock,
     timeoutMs: config.ai.timeoutMs,
     maxRetries: config.ai.maxRetries,
     runLimit: config.ai.runLimit,
@@ -51,11 +49,6 @@ debugLog("resolved configuration", {
     projectName: config.phoenix.projectName,
   },
 });
-if (debug && config.ai.provider !== "ollama") {
-  console.log(
-    `[ai:run debug] Ollama will NOT be called because AI_PROVIDER resolved to "${config.ai.provider}". Set AI_PROVIDER=ollama to use Ollama Cloud.`,
-  );
-}
 
 let run;
 try {
@@ -88,4 +81,3 @@ debugLog("briefing output", {
   prompt: run.output.briefing?.prompt,
   memory: run.output.briefing?.memory,
 });
-debugLog("provider fallback errors", run.provider?.fallbackErrors || []);
