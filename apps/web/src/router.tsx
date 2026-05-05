@@ -613,7 +613,7 @@ const aiRunModeOptions: { id: AiRunMode; label: string; hint: string }[] = [
 
 function AiOpsRoute() {
   const [runMode, setRunMode] = useState<AiRunMode>("auto");
-  const [runLimit, setRunLimit] = useState<number>(150);
+  const [runLimit, setRunLimit] = useState<number>(500);
   const query = useQuery({
     queryKey: queryKeys.aiControl,
     queryFn: getAiControl,
@@ -650,8 +650,8 @@ function AiOpsRoute() {
           <div>
             <h2>Control loop</h2>
             <p>
-              Runs the briefing pipeline only — one LLM call to draft the brief from existing
-              decisions. Per-message classification and ranking run as separate batches.
+              Runs the daily brief pipeline only — one LLM call to draft the greeting from
+              existing decisions. Classification and ranking run as separate batches.
             </p>
           </div>
           <div className="toolbar">
@@ -671,8 +671,8 @@ function AiOpsRoute() {
                 </button>
               ))}
             </div>
-            <label className="ai-run-limit" title="Max non-junk messages to include in the brief prompt">
-              <span className="ai-run-limit-label">Messages</span>
+            <label className="ai-run-limit" title="Max non-junk messages to score before drafting the brief">
+              <span className="ai-run-limit-label">Non-junk</span>
               <input
                 type="number"
                 min={1}
@@ -694,7 +694,7 @@ function AiOpsRoute() {
               data-testid="ai-run-loop"
             >
               {runMutation.isPending ? <Loader2 className="spin" size={17} /> : <BrainCircuit size={17} />}
-              Run loop
+              Run daily brief
             </button>
             <button
               className="button"
@@ -806,13 +806,22 @@ function AiRunSummary({ run }: { run: AiRun | null }) {
 
   const requestedModel = run.provider.requestedModel;
   const modelMismatch = requestedModel && requestedModel !== run.provider.model;
+  const latestLlmCall = [...(run.llmCalls || [])]
+    .reverse()
+    .find((call) => call.pipeline === "daily_brief") || [...(run.llmCalls || [])].at(-1);
 
   return (
     <div className="ops-panel" data-testid="ai-latest-run-status">
       <Activity size={18} />
       <strong>{run.status}</strong>
       <span>{run.metrics.messagesProcessed} messages · {run.metrics.latencyMs}ms</span>
+      <span className="muted">{run.kind} · {run.input.briefingFlow || run.input.pipeline || "pipeline"}</span>
       <span className="muted">{run.provider.name} · {run.provider.model}</span>
+      {latestLlmCall ? (
+        <span className={latestLlmCall.fallback ? "ops-warn" : "muted"}>
+          {latestLlmCall.pipeline} · {latestLlmCall.status} · {latestLlmCall.attempts} attempts
+        </span>
+      ) : null}
       {modelMismatch ? (
         <span className="ops-warn" data-testid="ai-model-mismatch">
           Requested {requestedModel}; server returned {run.provider.model}

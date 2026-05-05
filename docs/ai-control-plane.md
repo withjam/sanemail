@@ -112,7 +112,7 @@ apps/api/src/ai/evals.mjs
 - deterministic per-message classification, extraction, and ranking behavior
 - golden briefing and carry-over behavior
 - coverage for every registered prompt contract, including
-  `mail-classification-batch`
+  `mail-message-classification`
 
 This is the local version of the industry-standard loop: pin a prompt/model
 contract, run deterministic and golden evals on every change, record traces, and
@@ -169,7 +169,9 @@ Queue chaining:
 3. `classification.batch` claims a recent-first batch from
    `message_classification_state`, runs the classification chain, persists
    `message_classifications`, `message_type_assignments`, `message_features`,
-   and retry state, then enqueues `brief.generate`.
+   and retry state. Brief generation remains a separate `brief.generate` job so
+   classification and the user-facing daily brief are traced as distinct LLM
+   calls.
 4. If the batch creates enough candidate type evidence or feedback thresholds
    changed, it enqueues `message-types.discover`.
 5. `brief.generate` reads classified state, debounces repeated requests per
@@ -209,16 +211,18 @@ the scheduler.
 
 ## Classification Chain
 
-The first production classification chain should be a single batch LLM call
-surrounded by deterministic pre/post-processing:
+The production classification chain should be individual LLM calls surrounded by
+deterministic pre/post-processing. A `classification.batch` queue job can claim
+multiple messages for throughput, but each model request classifies exactly one
+message:
 
 1. Load active user taxonomy, source refs, existing feedback, and aggregate type
    stats.
 2. Build compact per-message features from headers/source metadata/body excerpt:
    sender domain, list id, source labels, directness, bulk/security/transactional
    hints, action cues, deadlines, and entity keys.
-3. Render `mail-classification-batch` with messages newest-first, the taxonomy,
-   policy, and user signals.
+3. Render `mail-message-classification` with one message, the taxonomy, policy,
+   and user signals.
 4. Validate the structured JSON response against the schema.
 5. Reconcile type assignments against the user's taxonomy. Unknown types become
    candidate suggestions unless they exactly match an accepted type alias.
@@ -234,10 +238,10 @@ The model should return:
 - ranked user message-type assignments
 - candidate type suggestions with evidence
 
-The current prompt registry includes `mail-classification-batch` as the target
-prompt for this queue worker. The older per-message `mail-triage`, `mail-extract`,
-and `mail-rank` prompts remain useful for deterministic local verification and
-for fallback or eval slices.
+The current prompt registry includes `mail-message-classification` as the target
+prompt contract for classification work. The per-message `mail-triage`,
+`mail-extract`, and `mail-rank` prompts remain useful for deterministic local
+verification and for fallback or eval slices.
 
 ## Instrumentation
 
@@ -314,11 +318,14 @@ Ollama defaults:
 ```text
 OLLAMA_HOST=http://127.0.0.1:11434
 OLLAMA_MODEL=deepseek-v4-pro:cloud
+OLLAMA_CLASSIFICATION_MODEL=your-fast-classifier-model
 OLLAMA_THINK=high
+OLLAMA_CLASSIFICATION_THINK=false
 OLLAMA_TEMPERATURE=0
+OLLAMA_CLASSIFICATION_TEMPERATURE=0
 AI_TIMEOUT_MS=120000
 AI_MAX_RETRIES=3
-AI_RUN_LIMIT=12
+AI_RUN_LIMIT=500
 AI_FALLBACK_TO_MOCK=true
 ```
 
@@ -330,6 +337,11 @@ transient 429/5xx error or malformed JSON, SaneMail retries. Briefing JSON is
 repaired first when the response is close enough to fix; if it is still malformed
 after the retry limit, the run keeps the deterministic briefing instead of
 crashing the server path.
+
+The daily brief pipeline is the primary periodic cycle. Cold starts score up to
+500 recent non-junk messages locally, then send a bounded relevance-focused
+context window to the briefing LLM. Iterative runs include messages since the
+previous brief plus unresolved previous callouts.
 
 The run record captures:
 

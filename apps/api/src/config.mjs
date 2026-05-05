@@ -60,6 +60,7 @@ export function loadConfig() {
   const appOrigin = process.env.APP_ORIGIN || `http://localhost:${port}`;
   const webOrigin = process.env.WEB_ORIGIN || appOrigin;
   const databaseUrl = buildDatabaseUrl();
+  const ollamaModel = process.env.OLLAMA_MODEL || process.env.AI_MODEL || "deepseek-v4-pro:cloud";
 
   return {
     port,
@@ -104,16 +105,25 @@ export function loadConfig() {
     ai: {
       timeoutMs: Number(process.env.AI_TIMEOUT_MS || 120_000),
       maxRetries: Number(process.env.AI_MAX_RETRIES || 3),
-      runLimit: Number(process.env.AI_RUN_LIMIT || 150),
+      runLimit: Number(process.env.AI_RUN_LIMIT || 500),
       briefingMode: process.env.AI_BRIEFING_MODE || "auto",
       ollamaClassifyMessages: booleanEnv("AI_OLLAMA_CLASSIFY_MESSAGES", false),
     },
     ollama: {
       host: process.env.OLLAMA_HOST || "http://127.0.0.1:11434",
-      model: process.env.OLLAMA_MODEL || process.env.AI_MODEL || "deepseek-v4-pro:cloud",
+      model: ollamaModel,
+      classificationModel:
+        process.env.OLLAMA_CLASSIFICATION_MODEL ||
+        process.env.AI_CLASSIFICATION_MODEL ||
+        ollamaModel,
       think: thinkEnv("OLLAMA_THINK", thinkEnv("AI_THINK", "high")),
+      classificationThink: thinkEnv(
+        "OLLAMA_CLASSIFICATION_THINK",
+        thinkEnv("AI_CLASSIFICATION_THINK", false),
+      ),
       apiKey: process.env.OLLAMA_API_KEY || "",
       temperature: Number(process.env.OLLAMA_TEMPERATURE || 0),
+      classificationTemperature: Number(process.env.OLLAMA_CLASSIFICATION_TEMPERATURE || 0),
     },
     phoenix: {
       enabled: booleanEnv("PHOENIX_ENABLED", false),

@@ -50,6 +50,10 @@ ollama pull deepseek-v4-pro:cloud
 AI_PROVIDER=ollama OLLAMA_MODEL=deepseek-v4-pro:cloud OLLAMA_THINK=high bun run ai:run
 ```
 
+Use `OLLAMA_CLASSIFICATION_MODEL` when classification should run on a separate
+fast model. Classification jobs still claim batches from the queue, but each LLM
+request classifies one message.
+
 The Ollama path retries transient cloud errors and falls back to the deterministic
 mock decision when `AI_FALLBACK_TO_MOCK=true`.
 

@@ -174,14 +174,14 @@ try {
     }
   });
   await expectJson(origin, "/api/ai/control", (payload) => {
-    if (!payload.prompts.some((prompt) => prompt.id === "mail-classification-batch")) {
-      throw new Error("AI control did not expose the batch classification prompt.");
+    if (!payload.prompts.some((prompt) => prompt.id === "mail-message-classification")) {
+      throw new Error("AI control did not expose the single-message classification prompt.");
     }
     if (!payload.prompts.every((prompt) => prompt.contractHash && prompt.modelBindingHash)) {
       throw new Error("AI control did not expose model-bound prompt contracts.");
     }
-    if (!payload.evals?.some((evalRecord) => evalRecord.promptIds.includes("mail-classification-batch"))) {
-      throw new Error("AI control did not expose eval coverage for batch classification.");
+    if (!payload.evals?.some((evalRecord) => evalRecord.promptIds.includes("mail-message-classification"))) {
+      throw new Error("AI control did not expose eval coverage for single-message classification.");
     }
   });
   // /api/ai/run is skipped in smoke: it requires a reachable Ollama host.

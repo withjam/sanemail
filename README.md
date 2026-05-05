@@ -142,6 +142,13 @@ AI_PROVIDER=ollama OLLAMA_MODEL=deepseek-v4-pro:cloud OLLAMA_THINK=false OLLAMA_
 AI_PROVIDER=ollama OLLAMA_MODEL=deepseek-v4-pro:cloud OLLAMA_THINK=false OLLAMA_TEMPERATURE=0 bun run dev
 ```
 
+Classification can use a separate fast model while the daily brief keeps the
+main reasoning model:
+
+```sh
+OLLAMA_CLASSIFICATION_MODEL=your-fast-classifier-model OLLAMA_CLASSIFICATION_THINK=false bun run worker
+```
+
 Send local AI traces to Phoenix:
 
 ```sh

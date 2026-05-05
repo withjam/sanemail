@@ -39,8 +39,11 @@ debugLog("resolved configuration", {
   ollama: {
     host: config.ollama.host,
     model: config.ollama.model,
+    classificationModel: config.ollama.classificationModel,
     think: config.ollama.think,
+    classificationThink: config.ollama.classificationThink,
     temperature: config.ollama.temperature,
+    classificationTemperature: config.ollama.classificationTemperature,
     apiKey: redactSecret(config.ollama.apiKey),
   },
   phoenix: {

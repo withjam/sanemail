@@ -339,13 +339,14 @@ async function routeSyncMock(response) {
 
 async function routeAiControl(response) {
   const runs = await listAiRuns(20);
+  const briefingRuns = runs.filter((run) => run.kind === "daily-brief" || run.output?.briefing);
   const verificationRuns = await listVerificationRuns(20);
   const queueJobs = await listQueueJobs(20);
   sendJson(response, {
     prompts: getPromptRecords(),
     evals: getAiEvalRecords(),
     observability: getPhoenixStatus(),
-    latestRun: runs[0] || null,
+    latestRun: briefingRuns[0] || runs[0] || null,
     runs,
     queueJobs,
     latestVerification: verificationRuns[0] || null,
@@ -517,10 +518,14 @@ function logOllamaBoot() {
   console.log("[ollama config]", {
     host: config.ollama.host,
     model: config.ollama.model,
+    classificationModel: config.ollama.classificationModel,
     temperature: config.ollama.temperature,
+    classificationTemperature: config.ollama.classificationTemperature,
     think: config.ollama.think,
+    classificationThink: config.ollama.classificationThink,
     apiKey: config.ollama.apiKey ? `set (${String(config.ollama.apiKey).length} chars)` : "unset",
     envOllamaModel: process.env.OLLAMA_MODEL ?? "(not set)",
+    envOllamaClassificationModel: process.env.OLLAMA_CLASSIFICATION_MODEL ?? "(not set)",
     envOllamaHost: process.env.OLLAMA_HOST ?? "(not set)",
     envOllamaTemperature: process.env.OLLAMA_TEMPERATURE ?? "(not set)",
     pid: process.pid,

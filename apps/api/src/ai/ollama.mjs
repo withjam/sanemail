@@ -471,12 +471,12 @@ function normalizeFinalError(error, stage, config) {
   return wrapped;
 }
 
-function chatOptions(config, attempt, { numPredict } = {}) {
+function chatOptions(config, attempt, { numPredict, think = config.ollama.think, temperature = config.ollama.temperature } = {}) {
   const jsonRecovery = attempt > 0;
   return {
-    think: jsonRecovery ? false : config.ollama.think,
+    think: jsonRecovery ? false : think,
     options: {
-      temperature: jsonRecovery ? 0 : config.ollama.temperature,
+      temperature: jsonRecovery ? 0 : temperature,
       ...(numPredict ? { num_predict: numPredict } : {}),
     },
     jsonRecovery,
@@ -567,14 +567,21 @@ export async function classifyWithOllama({ config, message, fallback, clientFact
   let lastError;
   const url = chatUrl(config.ollama.host);
   const retryLimit = maxRetries(config);
+  const requestModel = config.ollama.classificationModel || config.ollama.model;
+  const requestThink = config.ollama.classificationThink ?? false;
+  const requestTemperature = Number(config.ollama.classificationTemperature ?? 0);
 
   for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), config.ai.timeoutMs);
     const client = clientFactory(config, controller.signal);
-    const generated = chatOptions(config, attempt, { numPredict: 350 });
+    const generated = chatOptions(config, attempt, {
+      numPredict: 350,
+      think: requestThink,
+      temperature: requestTemperature,
+    });
     const body = {
-      model: config.ollama.model,
+      model: requestModel,
       stream: false,
       format: "json",
       think: generated.think,
@@ -588,6 +595,7 @@ export async function classifyWithOllama({ config, message, fallback, clientFact
         clientHost: clientHost(config.ollama.host),
         client: "official ollama-js",
         model: body.model,
+        briefingModel: config.ollama.model,
         think: body.think,
         temperature: body.options.temperature,
         jsonRecovery: generated.jsonRecovery,
@@ -603,7 +611,7 @@ export async function classifyWithOllama({ config, message, fallback, clientFact
         attempt: attempt + 1,
         messageId: message.id,
         latencyMs: Date.now() - started,
-        model: payload.model || config.ollama.model,
+        model: payload.model || requestModel,
       });
       const parsed = parseJsonContent(payload.message?.content || payload.response, {
         expectedKeys: ["category", "needsReply", "recsysScore"],
@@ -615,7 +623,8 @@ export async function classifyWithOllama({ config, message, fallback, clientFact
         decision,
         meta: {
           latencyMs: Date.now() - started,
-          model: payload.model || config.ollama.model,
+          model: payload.model || requestModel,
+          requestedModel: requestModel,
           thinkingChars: thinking.length,
           promptEvalCount: payload.prompt_eval_count || 0,
           evalCount: payload.eval_count || 0,

@@ -24,12 +24,12 @@ const promptEvalDefinitions = [
     checks: ["score range", "junk suppression", "automated suppression", "ranking reasons"],
   },
   {
-    id: "mail-classification-batch-contract-v1",
-    promptIds: ["mail-classification-batch"],
-    title: "Batch classification contract",
+    id: "mail-message-classification-contract-v1",
+    promptIds: ["mail-message-classification"],
+    title: "Single-message classification contract",
     evaluator: "schema-and-contract-assertions",
     checks: [
-      "recent-first batch input",
+      "single message input",
       "system category output",
       "dynamic message type assignments",
       "candidate type suggestions",

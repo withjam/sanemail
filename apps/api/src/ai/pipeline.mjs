@@ -305,6 +305,63 @@ function createSpan(name, startedAt, meta = {}) {
   };
 }
 
+function publicError(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function classificationModel(config) {
+  return config.ollama.classificationModel || config.ollama.model;
+}
+
+function boundedMessageLimit(limit, config) {
+  const requested = Number(limit === undefined ? config.ai.runLimit : limit);
+  const fallback = Number(config.ai.runLimit || 500);
+  const value = Number.isFinite(requested) && requested > 0 ? requested : fallback;
+  return Math.min(500, Math.max(1, Math.floor(value)));
+}
+
+const briefingContextLimits = {
+  recentMessages: 80,
+  attentionCandidates: 48,
+  upcomingCandidates: 40,
+  mayBeNeglected: 32,
+  backgroundContext: 24,
+  hiddenContext: 8,
+};
+
+function limitedDecisionItems(decisions, limit) {
+  const sorted = sortForBriefing(decisions);
+  return {
+    items: sorted.slice(0, limit).map(decisionBriefingItem),
+    total: sorted.length,
+    omitted: Math.max(0, sorted.length - limit),
+  };
+}
+
+function llmCallId() {
+  return `llm_${crypto.randomUUID()}`;
+}
+
+function promptInputHash(prompt) {
+  return hashValue({
+    system: prompt.system,
+    user: prompt.user,
+  });
+}
+
+function outputHash(value) {
+  return hashValue(value || null);
+}
+
+function recordLlmCall(run, call) {
+  run.llmCalls ||= [];
+  run.llmCalls.push({
+    id: llmCallId(),
+    createdAt: nowIso(),
+    ...call,
+  });
+}
+
 function aiDebugEnabled() {
   return ["1", "true", "yes", "on"].includes(String(process.env.AI_DEBUG || "").toLowerCase());
 }
@@ -606,6 +663,7 @@ function buildBriefingState(decisions = [], previousBriefing = null, memory = nu
   });
 
   return {
+    decisionCount: decisions.length,
     visible,
     needsReply,
     recent,
@@ -648,11 +706,46 @@ function decisionBriefingItem(decision) {
 }
 
 function briefingContextFromState(state, previousBriefing = null) {
+  const recentMessages = limitedDecisionItems(state.recent, briefingContextLimits.recentMessages);
+  const attentionCandidates = limitedDecisionItems(
+    state.needsReplyLast7,
+    briefingContextLimits.attentionCandidates,
+  );
+  const upcomingCandidates = limitedDecisionItems(state.upcoming, briefingContextLimits.upcomingCandidates);
+  const mayBeNeglected = limitedDecisionItems(
+    [
+      ...state.carryOver,
+      ...state.needsReplyLast7.filter((decision) => decisionAgeHours(decision) > 24),
+    ],
+    briefingContextLimits.mayBeNeglected,
+  );
+  const backgroundContext = limitedDecisionItems(state.automated, briefingContextLimits.backgroundContext);
+  const hiddenContext = limitedDecisionItems(state.hidden, briefingContextLimits.hiddenContext);
+
   return {
     instructionContext:
       "Use this as private context for deciding what matters. The user should only see the conversational summary and linked callouts.",
     recencyPolicy:
       "Prefer recent messages, include items from the past 7 days when still relevant, and use prior briefing items only to avoid neglecting important reminders.",
+    processingSummary: {
+      selectedMessages: state.memory?.includedMessageIds?.length ?? state.decisionCount,
+      visible: state.visible.length,
+      recent: state.recent.length,
+      last7Days: state.last7Days.length,
+      attentionCandidates: state.needsReplyLast7.length,
+      upcomingCandidates: state.upcoming.length,
+      backgroundContext: state.automated.length,
+      hiddenContext: state.hidden.length,
+      limits: briefingContextLimits,
+      omitted: {
+        recentMessages: recentMessages.omitted,
+        attentionCandidates: attentionCandidates.omitted,
+        upcomingCandidates: upcomingCandidates.omitted,
+        mayBeNeglected: mayBeNeglected.omitted,
+        backgroundContext: backgroundContext.omitted,
+        hiddenContext: hiddenContext.omitted,
+      },
+    },
     briefingMemory: {
       mode: state.memory?.mode || (previousBriefing ? "iterative" : "cold_start"),
       since: state.memory?.since || null,
@@ -676,15 +769,12 @@ function briefingContextFromState(state, previousBriefing = null) {
       messageIds: callout.messageIds,
       deliveredAt: callout.deliveredAt,
     })),
-    recentMessages: sortForBriefing(state.recent).map(decisionBriefingItem),
-    attentionCandidates: sortForBriefing(state.needsReplyLast7).map(decisionBriefingItem),
-    upcomingCandidates: sortForBriefing(state.upcoming).map(decisionBriefingItem),
-    mayBeNeglected: sortForBriefing([
-      ...state.carryOver,
-      ...state.needsReplyLast7.filter((decision) => decisionAgeHours(decision) > 24),
-    ]).map(decisionBriefingItem),
-    backgroundContext: sortForBriefing(state.automated).map(decisionBriefingItem),
-    hiddenContext: sortForBriefing(state.hidden).slice(0, 4).map(decisionBriefingItem),
+    recentMessages: recentMessages.items,
+    attentionCandidates: attentionCandidates.items,
+    upcomingCandidates: upcomingCandidates.items,
+    mayBeNeglected: mayBeNeglected.items,
+    backgroundContext: backgroundContext.items,
+    hiddenContext: hiddenContext.items,
     previousBriefing: previousBriefing
       ? {
           generatedAt: previousBriefing.generatedAt || previousBriefing.createdAt || null,
@@ -734,6 +824,11 @@ function renderBriefingPromptForDecisions(decisions = [], previousBriefing = nul
     hidden: state.hidden.map((decision) => decision.subject).slice(0, 3),
     context,
   });
+}
+
+export function buildBriefingContextForDecisions(decisions = [], previousBriefing = null, memory = null) {
+  const state = buildBriefingState(decisions, previousBriefing, memory);
+  return briefingContextFromState(state, previousBriefing);
 }
 
 export function buildInboxBriefing(decisions = [], { previousBriefing = null, memory = null } = {}) {
@@ -825,7 +920,13 @@ export function buildInboxBriefing(decisions = [], { previousBriefing = null, me
   };
 }
 
-function refreshRunOutput(run, decisions, previousBriefing = null, memory = null) {
+function refreshRunOutput(
+  run,
+  decisions,
+  previousBriefing = null,
+  memory = null,
+  { includeBriefing = true } = {},
+) {
   const curated = rankDecisions(decisions);
   const tokenCount = decisions.reduce(
     (sum, decision) => sum + decision.instrumentation.estimatedPromptTokens,
@@ -836,7 +937,7 @@ function refreshRunOutput(run, decisions, previousBriefing = null, memory = null
     decisions,
     curatedMessageIds: curated.map((decision) => decision.messageId),
     topTodayMessageIds: curated.slice(0, 8).map((decision) => decision.messageId),
-    briefing: buildInboxBriefing(decisions, { previousBriefing, memory }),
+    ...(includeBriefing ? { briefing: buildInboxBriefing(decisions, { previousBriefing, memory }) } : {}),
   };
   run.metrics = {
     ...run.metrics,
@@ -861,6 +962,8 @@ export function runAiLoopOnMessages({
   feedback = [],
   limit,
   trigger = "manual",
+  kind = "mailbox-curation",
+  includeBriefing = true,
   previousBriefing = null,
   briefingSelection = null,
   memory = null,
@@ -899,7 +1002,7 @@ export function runAiLoopOnMessages({
 
   return {
     id: `airun_${crypto.randomUUID()}`,
-    kind: "mailbox-curation",
+    kind,
     trigger,
     status: "succeeded",
     provider: {
@@ -911,6 +1014,7 @@ export function runAiLoopOnMessages({
     input: {
       accountId: account?.id || null,
       messageCount: scopedMessages.length,
+      pipeline: kind,
       corpusHash: hashValue(scopedMessages.map((message) => message.id)),
       briefingFlow: briefingMemory?.mode || (previousBriefing ? "iterative" : "cold_start"),
       messageSelection: briefingMemory
@@ -943,7 +1047,9 @@ export function runAiLoopOnMessages({
       decisions,
       curatedMessageIds: curated.map((decision) => decision.messageId),
       topTodayMessageIds: curated.slice(0, 8).map((decision) => decision.messageId),
-      briefing: buildInboxBriefing(decisions, { previousBriefing, memory: briefingMemory }),
+      ...(includeBriefing
+        ? { briefing: buildInboxBriefing(decisions, { previousBriefing, memory: briefingMemory }) }
+        : {}),
     },
     metrics: {
       latencyMs,
@@ -961,10 +1067,112 @@ export function runAiLoopOnMessages({
         : 0,
     },
     spans,
+    llmCalls: [],
     startedAt,
     completedAt,
     createdAt: completedAt,
   };
+}
+
+function fallbackBriefingAfterProviderError(fallback) {
+  const generatedAt = nowIso();
+  return {
+    ...fallback,
+    generatedAt,
+    memory: fallback?.memory
+      ? {
+          ...fallback.memory,
+          producedAt: generatedAt,
+        }
+      : fallback?.memory,
+    source: "ai-loop-provider-fallback",
+    model: fallback?.model || "deterministic-briefing-v0",
+  };
+}
+
+async function runOllamaDailyBriefCall({ run, config, prompt, fallback }) {
+  const started = Date.now();
+  const inputHash = promptInputHash(prompt);
+  try {
+    const result = await generateBriefingWithOllama({
+      config,
+      prompt,
+      fallback,
+    });
+    const status = result.meta.fallback ? "fallback" : "succeeded";
+    recordLlmCall(run, {
+      pipeline: "daily_brief",
+      stage: "brief_generation",
+      provider: "ollama",
+      status,
+      model: result.meta.model || config.ollama.model,
+      requestedModel: config.ollama.model,
+      promptId: prompt.id,
+      promptVersion: prompt.version,
+      promptHash: prompt.hash,
+      contractHash: prompt.contractHash,
+      inputHash,
+      outputHash: outputHash(result.briefing),
+      inputMessageCount: run.input?.messageCount || 0,
+      outputMessageCount: result.briefing?.messageIds?.length || 0,
+      attempts: result.meta.attempts,
+      latencyMs: result.meta.latencyMs,
+      promptEvalCount: result.meta.promptEvalCount,
+      evalCount: result.meta.evalCount,
+      thinkingChars: result.meta.thinkingChars,
+      fallback: Boolean(result.meta.fallback),
+      fallbackReason: result.meta.fallbackReason || null,
+    });
+    return result;
+  } catch (error) {
+    const latencyMs = Date.now() - started;
+    const message = publicError(error);
+    const briefing = fallbackBriefingAfterProviderError(fallback);
+    recordLlmCall(run, {
+      pipeline: "daily_brief",
+      stage: "brief_generation",
+      provider: "ollama",
+      status: "fallback",
+      model: config.ollama.model,
+      requestedModel: config.ollama.model,
+      promptId: prompt.id,
+      promptVersion: prompt.version,
+      promptHash: prompt.hash,
+      contractHash: prompt.contractHash,
+      inputHash,
+      outputHash: outputHash(briefing),
+      inputMessageCount: run.input?.messageCount || 0,
+      outputMessageCount: briefing?.messageIds?.length || 0,
+      attempts: Math.max(1, Number(config.ai.maxRetries || 0) + 1),
+      latencyMs,
+      promptEvalCount: 0,
+      evalCount: 0,
+      thinkingChars: 0,
+      fallback: true,
+      fallbackReason: "provider_error",
+      error: message,
+    });
+    console.warn("[ollama briefing fallback]", {
+      reason: "provider_error",
+      error: message,
+      requestModel: config.ollama.model,
+    });
+    return {
+      briefing,
+      meta: {
+        latencyMs,
+        model: config.ollama.model,
+        thinkingChars: 0,
+        promptEvalCount: 0,
+        evalCount: 0,
+        totalDurationNs: 0,
+        attempts: Math.max(1, Number(config.ai.maxRetries || 0) + 1),
+        fallback: true,
+        fallbackReason: "provider_error",
+        error: message,
+      },
+    };
+  }
 }
 
 async function applyOllamaProvider(
@@ -973,7 +1181,7 @@ async function applyOllamaProvider(
   config,
   previousBriefing = null,
   memory = null,
-  { briefingOnly = false } = {},
+  { briefingOnly = false, generateBriefing = true } = {},
 ) {
   const started = Date.now();
   const fallbackById = new Map(run.output.decisions.map((decision) => [decision.messageId, decision]));
@@ -987,16 +1195,22 @@ async function applyOllamaProvider(
     briefingThinkingChars: 0,
   };
   const classifyMessages = !briefingOnly && Boolean(config.ai.ollamaClassifyMessages);
+  const requestedClassificationModel = classificationModel(config);
+  let classificationResponseModel = null;
   aiDebugLog("ollama provider selected", {
     messageCount: scopedMessages.length,
     host: config.ollama.host,
-    model: config.ollama.model,
+    briefingModel: config.ollama.model,
+    classificationModel: requestedClassificationModel,
     think: config.ollama.think,
+    classificationThink: config.ollama.classificationThink,
     temperature: config.ollama.temperature,
+    classificationTemperature: config.ollama.classificationTemperature,
     timeoutMs: config.ai.timeoutMs,
     maxRetries: config.ai.maxRetries,
     classifyMessages,
     briefingOnly,
+    generateBriefing,
     briefingFlow: memory?.mode || (previousBriefing ? "iterative" : "cold_start"),
     since: memory?.since || null,
     apiKey: config.ollama.apiKey ? "set (redacted)" : "unset",
@@ -1013,16 +1227,58 @@ async function applyOllamaProvider(
       const fallback = fallbackById.get(message.id);
       if (!fallback) continue;
 
-      const result = await classifyWithOllama({ config, message, fallback });
+      let result;
+      const classificationStarted = Date.now();
+      try {
+        result = await classifyWithOllama({ config, message, fallback });
+      } catch (error) {
+        recordLlmCall(run, {
+          pipeline: "classification_batch",
+          stage: "message_classification",
+          provider: "ollama",
+          status: "failed",
+          model: requestedClassificationModel,
+          requestedModel: requestedClassificationModel,
+          inputHash: fallback.instrumentation.inputHash,
+          inputMessageCount: 1,
+          outputMessageCount: 0,
+          attempts: Math.max(1, Number(config.ai.maxRetries || 0) + 1),
+          latencyMs: Date.now() - classificationStarted,
+          promptEvalCount: 0,
+          evalCount: 0,
+          thinkingChars: 0,
+          error: publicError(error),
+        });
+        throw error;
+      }
+      recordLlmCall(run, {
+        pipeline: "classification_batch",
+        stage: "message_classification",
+        provider: "ollama",
+        status: "succeeded",
+        model: result.meta.model || requestedClassificationModel,
+        requestedModel: result.meta.requestedModel || requestedClassificationModel,
+        inputHash: fallback.instrumentation.inputHash,
+        outputHash: outputHash(result.decision),
+        inputMessageCount: 1,
+        outputMessageCount: 1,
+        attempts: result.meta.attempts,
+        latencyMs: result.meta.latencyMs,
+        promptEvalCount: result.meta.promptEvalCount,
+        evalCount: result.meta.evalCount,
+        thinkingChars: result.meta.thinkingChars,
+      });
       modelMetrics.promptEvalCount += result.meta.promptEvalCount;
       modelMetrics.evalCount += result.meta.evalCount;
       modelMetrics.thinkingChars += result.meta.thinkingChars;
+      classificationResponseModel = result.meta.model || requestedClassificationModel;
       decisions.push({
         ...fallback,
         ...result.decision,
         providerMeta: {
           name: "ollama",
           model: result.meta.model,
+          requestedModel: result.meta.requestedModel || requestedClassificationModel,
           latencyMs: result.meta.latencyMs,
           thinkingChars: result.meta.thinkingChars,
           attempts: result.meta.attempts,
@@ -1036,9 +1292,9 @@ async function applyOllamaProvider(
     }
   }
 
-  refreshRunOutput(run, decisions, previousBriefing, memory);
+  refreshRunOutput(run, decisions, previousBriefing, memory, { includeBriefing: generateBriefing });
   let briefingResponseModel = null;
-  if (decisions.length) {
+  if (generateBriefing && decisions.length) {
     const briefingStart = Date.now();
     const briefingPrompt = renderBriefingPromptForDecisions(decisions, previousBriefing, memory);
     aiDebugLog("ollama briefing context", {
@@ -1047,7 +1303,8 @@ async function applyOllamaProvider(
       promptUserChars: briefingPrompt.user.length,
       promptUserPreview: briefingPrompt.user.slice(0, 1600),
     });
-    const result = await generateBriefingWithOllama({
+    const result = await runOllamaDailyBriefCall({
+      run,
       config,
       prompt: briefingPrompt,
       fallback: run.output.briefing,
@@ -1059,6 +1316,8 @@ async function applyOllamaProvider(
     briefingResponseModel = result.meta.model || null;
     run.spans.push(
       createSpan("model.ollama_briefing", briefingStart, {
+        pipeline: "daily_brief",
+        status: result.meta.fallback ? "degraded" : "ok",
         model: result.meta.model,
         attempts: result.meta.attempts,
         fallback: Boolean(result.meta.fallback),
@@ -1069,8 +1328,13 @@ async function applyOllamaProvider(
   }
   run.provider = {
     name: "ollama",
-    model: briefingResponseModel || config.ollama.model,
-    requestedModel: config.ollama.model,
+    model:
+      briefingResponseModel ||
+      classificationResponseModel ||
+      (generateBriefing ? config.ollama.model : requestedClassificationModel),
+    requestedModel: generateBriefing ? config.ollama.model : requestedClassificationModel,
+    briefingModel: config.ollama.model,
+    classificationModel: requestedClassificationModel,
     temperature: config.ollama.temperature,
     think: config.ollama.think,
     host: config.ollama.host,
@@ -1081,6 +1345,7 @@ async function applyOllamaProvider(
     metrics: {
       providerLatencyMs: Date.now() - started,
       classifyMessages,
+      generateBriefing,
       decisionCount: decisions.length,
       ollamaPromptEvalCount: modelMetrics.promptEvalCount,
       ollamaEvalCount: modelMetrics.evalCount,
@@ -1101,19 +1366,30 @@ async function applyOllamaProvider(
   };
   run.spans.push(
     createSpan("model.ollama_chat", started, {
+      pipeline: generateBriefing ? "daily_brief" : "classification_batch",
+      status: (run.llmCalls || []).some((call) => call.fallback || call.status === "failed")
+        ? "degraded"
+        : "ok",
       decisionCount: decisions.length,
-      model: config.ollama.model,
-      think: String(config.ollama.think),
+      llmCallCount: run.llmCalls?.length || 0,
+      model: generateBriefing ? config.ollama.model : requestedClassificationModel,
+      think: String(generateBriefing ? config.ollama.think : config.ollama.classificationThink),
     }),
   );
   return run;
 }
 
-export async function runAiLoop({ limit, trigger = "manual", mode, briefingOnly = true } = {}) {
+export async function runAiLoop({
+  limit,
+  trigger = "manual",
+  mode,
+  briefingOnly = true,
+  generateBriefing = true,
+} = {}) {
   const config = loadConfig();
   const store = await readStore();
   const account = (await getPrimaryAccount()) || store.accounts[0] || null;
-  const effectiveLimit = limit === undefined ? config.ai.runLimit : limit;
+  const effectiveLimit = boundedMessageLimit(limit, config);
   const allMessages = [...(store.messages || [])]
     .filter((message) => !account?.id || message.accountId === account.id)
     .sort((a, b) => messageDeliveredAtMs(b) - messageDeliveredAtMs(a));
@@ -1156,8 +1432,11 @@ export async function runAiLoop({ limit, trigger = "manual", mode, briefingOnly 
     ollama: {
       host: config.ollama.host,
       model: config.ollama.model,
+      classificationModel: config.ollama.classificationModel,
       think: config.ollama.think,
+      classificationThink: config.ollama.classificationThink,
       temperature: config.ollama.temperature,
+      classificationTemperature: config.ollama.classificationTemperature,
       apiKey: config.ollama.apiKey ? "set (redacted)" : "unset",
     },
   });
@@ -1166,30 +1445,53 @@ export async function runAiLoop({ limit, trigger = "manual", mode, briefingOnly 
     messages,
     feedback: store.feedback,
     trigger,
+    kind: generateBriefing ? "daily-brief" : "classification-batch",
+    includeBriefing: generateBriefing,
     previousBriefing: contextBriefing,
     briefingSelection: selection,
+  });
+  run.promptRefs = getPromptSnapshots({
+    "mail-message-classification": {
+      provider: "ollama",
+      model: classificationModel(config),
+      temperature: config.ollama.classificationTemperature,
+      think: config.ollama.classificationThink,
+    },
+    "mail-briefing": {
+      provider: "ollama",
+      model: config.ollama.model,
+      temperature: config.ollama.temperature,
+      think: config.ollama.think,
+    },
   });
   console.log("[ai run] starting", {
     trigger,
     briefingOnly,
+    generateBriefing,
     briefingFlow: selection.mode,
     selectedMessages: messages.length,
     junkFiltered,
     ollama: {
       host: config.ollama.host,
       model: config.ollama.model,
+      classificationModel: config.ollama.classificationModel,
       temperature: config.ollama.temperature,
+      classificationTemperature: config.ollama.classificationTemperature,
       think: config.ollama.think,
+      classificationThink: config.ollama.classificationThink,
     },
     envOllamaModel: process.env.OLLAMA_MODEL ?? "(not set)",
+    envOllamaClassificationModel: process.env.OLLAMA_CLASSIFICATION_MODEL ?? "(not set)",
   });
   const ollamaStart = Date.now();
   await applyOllamaProvider(run, messages, config, contextBriefing, run.output.briefing?.memory, {
     briefingOnly,
+    generateBriefing,
   });
   console.log("[ai run] finished", {
     runId: run.id,
     requestedModel: config.ollama.model,
+    requestedClassificationModel: config.ollama.classificationModel,
     reportedProvider: run.provider.name,
     reportedModel: run.provider.model,
     latencyMs: Date.now() - ollamaStart,

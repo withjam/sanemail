@@ -7,7 +7,11 @@ import {
   getGoldenPreviousBriefing,
   getGoldenPromptRecords,
 } from "../apps/api/src/ai/golden-records.mjs";
-import { runAiLoopOnMessages, selectMessagesForBriefing } from "../apps/api/src/ai/pipeline.mjs";
+import {
+  buildBriefingContextForDecisions,
+  runAiLoopOnMessages,
+  selectMessagesForBriefing,
+} from "../apps/api/src/ai/pipeline.mjs";
 import { getPromptRecords, renderPrompt } from "../apps/api/src/ai/prompts.mjs";
 import { runSyntheticVerification } from "../apps/api/src/ai/verification.mjs";
 
@@ -73,7 +77,7 @@ test("AI loop creates instrumented decisions over synthetic mail", () => {
 
   assert.equal(run.status, "succeeded");
   assert.equal(run.metrics.messagesProcessed, DEMO_MESSAGE_COUNT);
-  assert.equal(run.promptRefs.some((prompt) => prompt.id === "mail-classification-batch"), true);
+  assert.equal(run.promptRefs.some((prompt) => prompt.id === "mail-message-classification"), true);
   assert.match(run.output.briefing.text, /mostly calm/);
   assert.match(run.output.briefing.text, /need your attention/i);
   assert.doesNotMatch(
@@ -183,6 +187,59 @@ test("iterative briefing selects new messages plus unresolved previous callouts"
   assert.deepEqual(selection.resolvedPreviousMessageIds, [
     "gmail:demo@example.com:message:golden-action-01-b",
   ]);
+});
+
+test("daily brief cold-start context stays bounded while scoring hundreds of messages", () => {
+  const baseTime = new Date("2026-05-05T13:00:00.000Z").getTime();
+  const messages = Array.from({ length: 220 }, (_item, index) => ({
+    id: `${account.id}:message:bulk-${index}`,
+    accountId: account.id,
+    provider: "gmail",
+    threadId: `${account.id}:thread:bulk-${index}`,
+    subject: `Please review contract ${index}`,
+    from: `Alex ${index} <alex${index}@example.com>`,
+    to: account.email,
+    date: new Date(baseTime - index * 60 * 1000).toISOString(),
+    internalDate: String(baseTime - index * 60 * 1000),
+    snippet: "Could you review this today?",
+    bodyText: "Could you review this today and let me know your thoughts?",
+    sourceLabels: ["INBOX"],
+    headers: { to: account.email },
+  }));
+  const run = runAiLoopOnMessages({
+    account,
+    messages,
+    trigger: "test",
+    kind: "daily-brief",
+  });
+  const context = buildBriefingContextForDecisions(
+    run.output.decisions,
+    null,
+    run.output.briefing.memory,
+  );
+
+  assert.equal(run.metrics.messagesProcessed, 220);
+  assert.equal(context.processingSummary.selectedMessages, 220);
+  assert.equal(context.recentMessages.length, 80);
+  assert.equal(context.attentionCandidates.length, 48);
+  assert.equal(context.upcomingCandidates.length, 40);
+  assert.equal(context.processingSummary.omitted.recentMessages > 0, true);
+  assert.equal(context.processingSummary.omitted.attentionCandidates > 0, true);
+});
+
+test("classification batch runs do not write a daily briefing", () => {
+  const messages = buildDemoMessages(account).slice(0, 12);
+  const run = runAiLoopOnMessages({
+    account,
+    messages,
+    trigger: "test:classification.batch",
+    kind: "classification-batch",
+    includeBriefing: false,
+  });
+
+  assert.equal(run.kind, "classification-batch");
+  assert.equal(run.output.briefing, undefined);
+  assert.equal(run.output.decisions.length, 12);
 });
 
 test("done feedback removes a previous briefing item from carry-over attention", () => {

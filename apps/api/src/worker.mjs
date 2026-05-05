@@ -23,6 +23,7 @@ async function handleClassificationBatch(job) {
     limit: payload.maxBatchSize,
     mode: "iterative",
     briefingOnly: false,
+    generateBriefing: false,
     trigger: "queue:classification.batch",
   });
 

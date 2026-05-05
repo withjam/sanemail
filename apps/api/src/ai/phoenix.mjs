@@ -138,15 +138,36 @@ function categoryCountAttributes(categoryCounts) {
   );
 }
 
+function attributeValue(value) {
+  if (value === undefined || value === null) return undefined;
+  if (["string", "number", "boolean"].includes(typeof value)) return value;
+  if (Array.isArray(value) && value.every((item) => ["string", "number", "boolean"].includes(typeof item))) {
+    return value;
+  }
+  return JSON.stringify(value);
+}
+
+function recordedSpanAttributes(recordedSpan) {
+  const ignored = new Set(["name", "status", "durationMs"]);
+  return Object.fromEntries(
+    Object.entries(recordedSpan)
+      .filter(([key]) => !ignored.has(key))
+      .map(([key, value]) => [`sanemail.stage.${key}`, attributeValue(value)])
+      .filter(([_key, value]) => value !== undefined),
+  );
+}
+
 function runAttributes(run) {
   return {
     "sanemail.kind": run.kind,
     "sanemail.run_id": run.id,
     "sanemail.trigger": run.trigger,
     "sanemail.status": run.status,
+    "sanemail.pipeline": run.input.pipeline,
     "sanemail.account_id": run.input.accountId,
     "sanemail.corpus_hash": run.input.corpusHash,
     "sanemail.message_count": run.metrics.messagesProcessed,
+    "sanemail.llm_call_count": run.llmCalls?.length || 0,
     "sanemail.curated_count": run.output.curatedMessageIds.length,
     "sanemail.average_confidence": run.metrics.averageConfidence,
     "sanemail.latency_ms": run.metrics.latencyMs,
@@ -161,6 +182,8 @@ function runAttributes(run) {
     "llm.invocation_parameters": JSON.stringify({
       temperature: run.provider.temperature,
       think: run.provider.think,
+      briefingModel: run.provider.briefingModel,
+      classificationModel: run.provider.classificationModel,
     }),
     ...categoryCountAttributes(run.metrics.categoryCounts),
     ...promptAttributes(run.promptRefs),
@@ -178,6 +201,7 @@ async function traceRecordedSpans(run) {
       "sanemail.prompt_count": recordedSpan.promptCount,
       "sanemail.decision_count": recordedSpan.decisionCount,
       "sanemail.curated_count": recordedSpan.curatedCount,
+      ...recordedSpanAttributes(recordedSpan),
     }, async () => {});
   }
 }
@@ -243,6 +267,46 @@ async function traceDecisionSummaries(run) {
   }
 }
 
+async function traceLlmCalls(run) {
+  for (const call of run.llmCalls || []) {
+    await withSpan(`sanemail.llm.${call.pipeline}`, {
+      ...getLLMAttributes({
+        provider: call.provider,
+        modelName: call.model,
+        invocationParameters: {
+          requestedModel: call.requestedModel,
+          pipeline: call.pipeline,
+          stage: call.stage,
+          attempts: call.attempts,
+          fallback: Boolean(call.fallback),
+        },
+        tokenCount: {
+          prompt: call.promptEvalCount,
+          completion: call.evalCount,
+          total: call.promptEvalCount + call.evalCount,
+        },
+        inputMessages: [{ role: "user", content: `input:${call.inputHash}` }],
+        outputMessages: [{ role: "assistant", content: `output:${call.outputHash || call.status}` }],
+      }),
+      "sanemail.run_id": run.id,
+      "sanemail.llm_call_id": call.id,
+      "sanemail.pipeline": call.pipeline,
+      "sanemail.stage": call.stage,
+      "sanemail.call_status": call.status,
+      "sanemail.fallback": Boolean(call.fallback),
+      "sanemail.fallback_reason": call.fallbackReason,
+      "sanemail.error": call.error,
+      "sanemail.latency_ms": call.latencyMs,
+      "sanemail.input_message_count": call.inputMessageCount,
+      "sanemail.output_message_count": call.outputMessageCount,
+      "sanemail.prompt_id": call.promptId,
+      "sanemail.prompt_version": call.promptVersion,
+      "sanemail.prompt_hash": call.promptHash,
+      "sanemail.contract_hash": call.contractHash,
+    }, async () => {});
+  }
+}
+
 export function getPhoenixStatus() {
   const state = initializePhoenix();
   const { provider: _provider, tracer: _tracer, ...status } = state;
@@ -254,9 +318,11 @@ export async function traceAiRun(run) {
   if (!state.available) return getPhoenixStatus();
 
   let traceId = null;
-  await withSpan("sanemail.ai.mailbox_curation", runAttributes(run), async () => {
+  const pipeline = String(run.input.pipeline || run.kind || "mailbox-curation").replaceAll("-", "_");
+  await withSpan(`sanemail.ai.${pipeline}`, runAttributes(run), async () => {
     traceId = activeTraceId();
     await traceRecordedSpans(run);
+    await traceLlmCalls(run);
     await traceModelSummary(run);
     await traceEmbeddingSummary(run);
     await traceDecisionSummaries(run);

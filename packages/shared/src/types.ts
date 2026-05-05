@@ -451,6 +451,8 @@ export type AiRun = {
     name: string;
     model: string;
     requestedModel?: string;
+    briefingModel?: string;
+    classificationModel?: string;
     temperature: number;
     think?: string | boolean;
     host?: string;
@@ -460,6 +462,7 @@ export type AiRun = {
   input: {
     accountId: string | null;
     messageCount: number;
+    pipeline?: string;
     corpusHash: string;
     briefingFlow?: "cold_start" | "iterative";
     messageSelection?: {
@@ -500,6 +503,32 @@ export type AiRun = {
     status: string;
     durationMs: number;
     [key: string]: unknown;
+  }>;
+  llmCalls?: Array<{
+    id: string;
+    pipeline: string;
+    stage: string;
+    provider: string;
+    status: "succeeded" | "failed" | "fallback";
+    model: string;
+    requestedModel?: string;
+    promptId?: string;
+    promptVersion?: string;
+    promptHash?: string;
+    contractHash?: string;
+    inputHash: string;
+    outputHash?: string;
+    inputMessageCount: number;
+    outputMessageCount: number;
+    attempts: number;
+    latencyMs: number;
+    promptEvalCount: number;
+    evalCount: number;
+    thinkingChars: number;
+    fallback?: boolean;
+    fallbackReason?: string | null;
+    error?: string;
+    createdAt: string;
   }>;
   startedAt: string;
   completedAt: string;
