@@ -804,12 +804,20 @@ function AiRunSummary({ run }: { run: AiRun | null }) {
     );
   }
 
+  const requestedModel = run.provider.requestedModel;
+  const modelMismatch = requestedModel && requestedModel !== run.provider.model;
+
   return (
     <div className="ops-panel" data-testid="ai-latest-run-status">
       <Activity size={18} />
       <strong>{run.status}</strong>
       <span>{run.metrics.messagesProcessed} messages · {run.metrics.latencyMs}ms</span>
       <span className="muted">{run.provider.name} · {run.provider.model}</span>
+      {modelMismatch ? (
+        <span className="ops-warn" data-testid="ai-model-mismatch">
+          Requested {requestedModel}; server returned {run.provider.model}
+        </span>
+      ) : null}
       <span className="muted">confidence {formatPercent(run.metrics.averageConfidence)}</span>
     </div>
   );

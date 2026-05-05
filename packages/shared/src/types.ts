@@ -450,6 +450,7 @@ export type AiRun = {
   provider: {
     name: string;
     model: string;
+    requestedModel?: string;
     temperature: number;
     think?: string | boolean;
     host?: string;

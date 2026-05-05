@@ -513,6 +513,21 @@ export function createServer() {
   return http.createServer(handleRequest);
 }
 
+function logOllamaBoot() {
+  console.log("[ollama config]", {
+    host: config.ollama.host,
+    model: config.ollama.model,
+    temperature: config.ollama.temperature,
+    think: config.ollama.think,
+    apiKey: config.ollama.apiKey ? `set (${String(config.ollama.apiKey).length} chars)` : "unset",
+    envOllamaModel: process.env.OLLAMA_MODEL ?? "(not set)",
+    envOllamaHost: process.env.OLLAMA_HOST ?? "(not set)",
+    envOllamaTemperature: process.env.OLLAMA_TEMPERATURE ?? "(not set)",
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+  });
+}
+
 export function startServer() {
   const server = createServer();
   server.listen(config.port, config.host, () => {
@@ -522,6 +537,7 @@ export function startServer() {
         ? `http://${config.host}:${address.port}`
         : config.appOrigin;
     console.log(`SaneMail API running at ${origin}`);
+    logOllamaBoot();
   });
   return server;
 }

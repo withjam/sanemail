@@ -440,6 +440,14 @@ export async function generateBriefingWithOllama({ config, prompt, fallback }) {
     };
 
     try {
+      console.log("[ollama briefing request]", {
+        url,
+        attempt: attempt + 1,
+        requestModel: body.model,
+        think: body.think,
+        temperature: body.options.temperature,
+        promptUserChars: prompt.user.length,
+      });
       debugLog("briefing request", {
         url,
         clientHost: clientHost(config.ollama.host),
@@ -454,6 +462,16 @@ export async function generateBriefingWithOllama({ config, prompt, fallback }) {
         apiKey: config.ollama.apiKey ? "set (redacted)" : "unset",
       });
       const payload = await client.chat(body);
+      console.log("[ollama briefing response]", {
+        url,
+        attempt: attempt + 1,
+        latencyMs: Date.now() - started,
+        requestModel: body.model,
+        responseModel: payload.model || "(none returned)",
+        modelMismatch: payload.model && payload.model !== body.model,
+        promptEvalCount: payload.prompt_eval_count || 0,
+        evalCount: payload.eval_count || 0,
+      });
       debugLog("briefing response", {
         url,
         status: 200,

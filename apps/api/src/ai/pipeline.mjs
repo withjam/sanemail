@@ -1037,6 +1037,7 @@ async function applyOllamaProvider(
   }
 
   refreshRunOutput(run, decisions, previousBriefing, memory);
+  let briefingResponseModel = null;
   if (decisions.length) {
     const briefingStart = Date.now();
     const briefingPrompt = renderBriefingPromptForDecisions(decisions, previousBriefing, memory);
@@ -1055,6 +1056,7 @@ async function applyOllamaProvider(
     modelMetrics.briefingEvalCount += result.meta.evalCount;
     modelMetrics.briefingThinkingChars += result.meta.thinkingChars;
     run.output.briefing = result.briefing;
+    briefingResponseModel = result.meta.model || null;
     run.spans.push(
       createSpan("model.ollama_briefing", briefingStart, {
         model: result.meta.model,
@@ -1065,7 +1067,8 @@ async function applyOllamaProvider(
   }
   run.provider = {
     name: "ollama",
-    model: config.ollama.model,
+    model: briefingResponseModel || config.ollama.model,
+    requestedModel: config.ollama.model,
     temperature: config.ollama.temperature,
     think: config.ollama.think,
     host: config.ollama.host,
@@ -1164,8 +1167,32 @@ export async function runAiLoop({ limit, trigger = "manual", mode, briefingOnly 
     previousBriefing: contextBriefing,
     briefingSelection: selection,
   });
+  console.log("[ai run] starting", {
+    trigger,
+    briefingOnly,
+    briefingFlow: selection.mode,
+    selectedMessages: messages.length,
+    junkFiltered,
+    ollama: {
+      host: config.ollama.host,
+      model: config.ollama.model,
+      temperature: config.ollama.temperature,
+      think: config.ollama.think,
+    },
+    envOllamaModel: process.env.OLLAMA_MODEL ?? "(not set)",
+  });
+  const ollamaStart = Date.now();
   await applyOllamaProvider(run, messages, config, contextBriefing, run.output.briefing?.memory, {
     briefingOnly,
+  });
+  console.log("[ai run] finished", {
+    runId: run.id,
+    requestedModel: config.ollama.model,
+    reportedProvider: run.provider.name,
+    reportedModel: run.provider.model,
+    latencyMs: Date.now() - ollamaStart,
+    decisions: run.output.decisions.length,
+    briefCallouts: run.output.briefing?.callouts?.length || 0,
   });
   run.observability = await traceAiRun(run);
   await recordAiRun(run);
