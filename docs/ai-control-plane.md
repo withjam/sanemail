@@ -317,7 +317,7 @@ OLLAMA_MODEL=deepseek-v4-pro:cloud
 OLLAMA_THINK=high
 OLLAMA_TEMPERATURE=0
 AI_TIMEOUT_MS=120000
-AI_MAX_RETRIES=2
+AI_MAX_RETRIES=3
 AI_RUN_LIMIT=12
 AI_FALLBACK_TO_MOCK=true
 ```
@@ -326,8 +326,10 @@ AI_FALLBACK_TO_MOCK=true
 not be sent to a remote model by accident. Once you explicitly set
 `AI_PROVIDER=ollama`, each message is sent through Ollama's `/api/chat` endpoint
 with `format: "json"` and the configured `think` value. If Ollama returns a
-transient 429/5xx error, SaneMail retries and then falls back to the deterministic
-mock decision when `AI_FALLBACK_TO_MOCK=true`.
+transient 429/5xx error or malformed JSON, SaneMail retries. Briefing JSON is
+repaired first when the response is close enough to fix; if it is still malformed
+after the retry limit, the run keeps the deterministic briefing instead of
+crashing the server path.
 
 The run record captures:
 

@@ -42,25 +42,234 @@ function createClient(config, signal) {
   });
 }
 
-function parseJsonContent(content) {
-  const trimmed = String(content || "").trim();
-  if (!trimmed) throw new Error("Ollama returned an empty message.");
-
-  try {
-    return JSON.parse(trimmed);
-  } catch (error) {
-    const match = trimmed.match(/\{[\s\S]*\}/);
-    if (!match) throw contentPreviewError(new Error("Ollama did not return JSON."), content);
-    try {
-      return JSON.parse(match[0]);
-    } catch {
-      throw contentPreviewError(error, content);
-    }
-  }
+function stripJsonFence(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/, "")
+    .trim();
 }
 
-function contentPreviewError(error, content) {
+function findBalancedJsonEnd(value, startIndex) {
+  const opener = value[startIndex];
+  if (opener !== "{" && opener !== "[") return -1;
+
+  const stack = [opener];
+  let inString = false;
+  let escaped = false;
+
+  for (let index = startIndex + 1; index < value.length; index += 1) {
+    const char = value[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{" || char === "[") {
+      stack.push(char);
+      continue;
+    }
+
+    if (char !== "}" && char !== "]") continue;
+
+    const expected = stack.pop();
+    if ((char === "}" && expected !== "{") || (char === "]" && expected !== "[")) return -1;
+    if (!stack.length) return index;
+  }
+
+  return -1;
+}
+
+function balancedJsonCandidates(value) {
+  const candidates = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (char !== "{" && char !== "[") continue;
+
+    const endIndex = findBalancedJsonEnd(value, index);
+    if (endIndex !== -1) candidates.push(value.slice(index, endIndex + 1));
+  }
+  return candidates;
+}
+
+function partialJsonCandidates(value) {
+  const candidates = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (char === "{" || char === "[") candidates.push(value.slice(index));
+  }
+  return candidates;
+}
+
+function uniqueCandidates(candidates) {
+  const seen = new Set();
+  return candidates
+    .map((candidate) => String(candidate || "").trim())
+    .filter(Boolean)
+    .filter((candidate) => {
+      if (seen.has(candidate)) return false;
+      seen.add(candidate);
+      return true;
+    });
+}
+
+function jsonCandidates(content) {
+  const trimmed = String(content || "").trim();
+  const unfenced = stripJsonFence(trimmed);
+  return uniqueCandidates([
+    trimmed,
+    unfenced,
+    ...balancedJsonCandidates(unfenced),
+    ...partialJsonCandidates(unfenced),
+  ]);
+}
+
+function escapeControlCharsInStrings(value) {
+  let result = "";
+  let inString = false;
+  let escaped = false;
+
+  for (const char of value) {
+    if (!inString) {
+      if (char === "\"") inString = true;
+      result += char;
+      continue;
+    }
+
+    if (escaped) {
+      escaped = false;
+      result += char;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaped = true;
+      result += char;
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = false;
+      result += char;
+      continue;
+    }
+
+    if (char === "\n") {
+      result += "\\n";
+    } else if (char === "\r") {
+      result += "\\r";
+    } else if (char === "\t") {
+      result += "\\t";
+    } else {
+      result += char;
+    }
+  }
+
+  return result;
+}
+
+function closeJsonDelimiters(value) {
+  const stack = [];
+  let inString = false;
+  let escaped = false;
+
+  for (const char of value) {
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{" || char === "[") {
+      stack.push(char);
+      continue;
+    }
+
+    if (char !== "}" && char !== "]") continue;
+
+    const expected = stack.pop();
+    if ((char === "}" && expected !== "{") || (char === "]" && expected !== "[")) return value;
+  }
+
+  let closed = inString ? `${value}"` : value;
+  for (let index = stack.length - 1; index >= 0; index -= 1) {
+    closed += stack[index] === "{" ? "}" : "]";
+  }
+  return closed;
+}
+
+function repairJsonCandidate(candidate) {
+  return closeJsonDelimiters(
+    escapeControlCharsInStrings(stripJsonFence(candidate)).replace(/,\s*([}\]])/g, "$1"),
+  );
+}
+
+function hasExpectedJsonShape(parsed, expectedKeys) {
+  if (!expectedKeys.length) return true;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+  return expectedKeys.some((key) => Object.prototype.hasOwnProperty.call(parsed, key));
+}
+
+export function parseJsonContent(content, { expectedKeys = [] } = {}) {
+  const trimmed = String(content || "").trim();
+  if (!trimmed) {
+    throw contentPreviewError(new Error("Ollama returned an empty message."), content, {
+      code: "OLLAMA_MALFORMED_JSON",
+      retryable: true,
+    });
+  }
+
+  let lastError = null;
+  let shapeError = null;
+  for (const candidate of jsonCandidates(trimmed)) {
+    const parseCandidates = uniqueCandidates([candidate, repairJsonCandidate(candidate)]);
+    for (const parseCandidate of parseCandidates) {
+      try {
+        const parsed = JSON.parse(parseCandidate);
+        if (hasExpectedJsonShape(parsed, expectedKeys)) return parsed;
+        shapeError ||= new Error("Ollama JSON did not match the expected response shape.");
+      } catch (error) {
+        lastError = error;
+      }
+    }
+  }
+
+  throw contentPreviewError(
+    shapeError || lastError || new Error("Ollama did not return JSON."),
+    content,
+    {
+      code: "OLLAMA_MALFORMED_JSON",
+      retryable: true,
+    },
+  );
+}
+
+function contentPreviewError(error, content, options = {}) {
   error.contentPreview = String(content || "").slice(0, 1600);
+  if (options.code) error.code = options.code;
+  if (options.retryable !== undefined) error.retryable = options.retryable;
   return error;
 }
 
@@ -204,8 +413,24 @@ function retryableStatus(status) {
   return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
 }
 
+function maxRetries(config) {
+  const retries = Number(config?.ai?.maxRetries);
+  if (!Number.isFinite(retries) || retries < 0) return 3;
+  return Math.floor(retries);
+}
+
 function statusFromError(error) {
   return error?.status ?? error?.status_code ?? error?.response?.status;
+}
+
+function isRetryableError(error) {
+  const status = statusFromError(error);
+  if (status) return retryableStatus(status);
+  return error?.retryable !== false;
+}
+
+function isJsonContentError(error) {
+  return error?.code === "OLLAMA_MALFORMED_JSON";
 }
 
 function retryAfterMs(value) {
@@ -255,6 +480,22 @@ function chatOptions(config, attempt, { numPredict } = {}) {
       ...(numPredict ? { num_predict: numPredict } : {}),
     },
     jsonRecovery,
+  };
+}
+
+function fallbackBriefingForJsonError(fallback) {
+  const generatedAt = new Date().toISOString();
+  return {
+    ...fallback,
+    generatedAt,
+    memory: fallback.memory
+      ? {
+          ...fallback.memory,
+          producedAt: generatedAt,
+        }
+      : fallback.memory,
+    source: "ai-loop-fallback",
+    model: fallback.model || "deterministic-briefing-v0",
   };
 }
 
@@ -321,15 +562,16 @@ function buildMessages(message, fallback) {
   ];
 }
 
-export async function classifyWithOllama({ config, message, fallback }) {
+export async function classifyWithOllama({ config, message, fallback, clientFactory = createClient, sleepFn = sleep }) {
   const started = Date.now();
   let lastError;
   const url = chatUrl(config.ollama.host);
+  const retryLimit = maxRetries(config);
 
-  for (let attempt = 0; attempt <= config.ai.maxRetries; attempt += 1) {
+  for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), config.ai.timeoutMs);
-    const client = createClient(config, controller.signal);
+    const client = clientFactory(config, controller.signal);
     const generated = chatOptions(config, attempt, { numPredict: 350 });
     const body = {
       model: config.ollama.model,
@@ -363,7 +605,9 @@ export async function classifyWithOllama({ config, message, fallback }) {
         latencyMs: Date.now() - started,
         model: payload.model || config.ollama.model,
       });
-      const parsed = parseJsonContent(payload.message?.content || payload.response);
+      const parsed = parseJsonContent(payload.message?.content || payload.response, {
+        expectedKeys: ["category", "needsReply", "recsysScore"],
+      });
       const decision = normalizeDecision(parsed, fallback);
       const thinking = payload.message?.thinking || payload.thinking || "";
 
@@ -392,7 +636,7 @@ export async function classifyWithOllama({ config, message, fallback }) {
         error: errorMessage(error),
         responsePreview: responsePreview(error),
       });
-      if (attempt >= config.ai.maxRetries || (status && !retryableStatus(status))) break;
+      if (attempt >= retryLimit || !isRetryableError(error)) break;
       const delayMs = retryDelayMs(error, attempt);
       debugLog("classification retry", {
         status,
@@ -402,7 +646,7 @@ export async function classifyWithOllama({ config, message, fallback }) {
         jsonRecovery: true,
         messageId: message.id,
       });
-      await sleep(delayMs);
+      await sleepFn(delayMs);
     } finally {
       clearTimeout(timeout);
     }
@@ -411,15 +655,24 @@ export async function classifyWithOllama({ config, message, fallback }) {
   throw normalizeFinalError(lastError, "classification", config);
 }
 
-export async function generateBriefingWithOllama({ config, prompt, fallback }) {
+export async function generateBriefingWithOllama({
+  config,
+  prompt,
+  fallback,
+  clientFactory = createClient,
+  sleepFn = sleep,
+}) {
   const started = Date.now();
   let lastError;
+  let attempts = 0;
   const url = chatUrl(config.ollama.host);
+  const retryLimit = maxRetries(config);
 
-  for (let attempt = 0; attempt <= config.ai.maxRetries; attempt += 1) {
+  for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
+    attempts = attempt + 1;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), config.ai.timeoutMs);
-    const client = createClient(config, controller.signal);
+    const client = clientFactory(config, controller.signal);
     const generated = chatOptions(config, attempt, { numPredict: 900 });
     const body = {
       model: config.ollama.model,
@@ -481,7 +734,9 @@ export async function generateBriefingWithOllama({ config, prompt, fallback }) {
         latencyMs: Date.now() - started,
         model: payload.model || config.ollama.model,
       });
-      const parsed = parseJsonContent(payload.message?.content || payload.response);
+      const parsed = parseJsonContent(payload.message?.content || payload.response, {
+        expectedKeys: ["text", "narrative", "callouts"],
+      });
       const thinking = payload.message?.thinking || payload.thinking || "";
 
       return {
@@ -509,7 +764,7 @@ export async function generateBriefingWithOllama({ config, prompt, fallback }) {
         error: errorMessage(error),
         responsePreview: responsePreview(error),
       });
-      if (attempt >= config.ai.maxRetries || (status && !retryableStatus(status))) break;
+      if (attempt >= retryLimit || !isRetryableError(error)) break;
       const delayMs = retryDelayMs(error, attempt);
       debugLog("briefing retry", {
         status,
@@ -519,10 +774,39 @@ export async function generateBriefingWithOllama({ config, prompt, fallback }) {
         jsonRecovery: true,
         promptId: prompt.id,
       });
-      await sleep(delayMs);
+      await sleepFn(delayMs);
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  if (isJsonContentError(lastError)) {
+    console.warn("[ollama briefing fallback]", {
+      reason: "malformed_json",
+      attempts,
+      requestModel: config.ollama.model,
+      responsePreview: responsePreview(lastError),
+    });
+    debugLog("briefing fallback", {
+      reason: "malformed_json",
+      attempts,
+      promptId: prompt.id,
+      responsePreview: responsePreview(lastError),
+    });
+    return {
+      briefing: fallbackBriefingForJsonError(fallback),
+      meta: {
+        latencyMs: Date.now() - started,
+        model: config.ollama.model,
+        thinkingChars: 0,
+        promptEvalCount: 0,
+        evalCount: 0,
+        totalDurationNs: 0,
+        attempts,
+        fallback: true,
+        fallbackReason: "malformed_json",
+      },
+    };
   }
 
   throw normalizeFinalError(lastError, "briefing", config);

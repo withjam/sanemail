@@ -1061,6 +1061,8 @@ async function applyOllamaProvider(
       createSpan("model.ollama_briefing", briefingStart, {
         model: result.meta.model,
         attempts: result.meta.attempts,
+        fallback: Boolean(result.meta.fallback),
+        fallbackReason: result.meta.fallbackReason || null,
         calloutCount: result.briefing.callouts?.length || 0,
       }),
     );

@@ -103,7 +103,7 @@ export function loadConfig() {
     },
     ai: {
       timeoutMs: Number(process.env.AI_TIMEOUT_MS || 120_000),
-      maxRetries: Number(process.env.AI_MAX_RETRIES || 2),
+      maxRetries: Number(process.env.AI_MAX_RETRIES || 3),
       runLimit: Number(process.env.AI_RUN_LIMIT || 150),
       briefingMode: process.env.AI_BRIEFING_MODE || "auto",
       ollamaClassifyMessages: booleanEnv("AI_OLLAMA_CLASSIFY_MESSAGES", false),
