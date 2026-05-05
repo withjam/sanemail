@@ -154,7 +154,7 @@ function normalizeCallouts(payloadCallouts, fallbackCallouts = []) {
     normalized.push({
       id: fallback.id,
       kind,
-      label: "Need attention",
+      label: "Needs attention",
       title: stringValue(item.title, fallback.title),
       body: stringValue(item.body, fallback.body),
       messageId,

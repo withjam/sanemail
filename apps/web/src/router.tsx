@@ -97,7 +97,7 @@ function classForCategory(category: string) {
 }
 
 function labelForCategory(category: string) {
-  return category === "Needs Reply" ? "Need attention" : category;
+  return category === "Needs Reply" ? "Needs attention" : category;
 }
 
 const defaultObservability: PhoenixObservabilityStatus = {
@@ -284,7 +284,7 @@ function Dashboard() {
   const tabs = home.data.tabs;
   const tabItems = [
     { id: "mostRecent" as const, label: "Most recent", messages: tabs.mostRecent },
-    { id: "needsReply" as const, label: "Need attention", messages: tabs.needsReply },
+    { id: "needsReply" as const, label: "Needs attention", messages: tabs.needsReply },
     { id: "upcoming" as const, label: "Upcoming", messages: tabs.upcoming },
   ];
   const active = tabItems.find((item) => item.id === activeTab) || tabItems[0];
@@ -555,7 +555,7 @@ function MessageDetailRoute() {
     ["not-important", "Not important", ThumbsDown],
     ["junk", "Junk", ShieldAlert],
     ["not-junk", "Not junk", ThumbsUp],
-    ["needs-reply", "Need attention", MessageSquare],
+    ["needs-reply", "Needs attention", MessageSquare],
     ["done", "Done", Check],
   ];
 
@@ -1084,7 +1084,7 @@ function SettingsRoute() {
         <div className="stats-grid compact">
           <Stat icon={Mail} label="Synced" value={statusData.counts.messages} testId="settings-stat-synced" />
           <Stat icon={CheckCircle2} label="Today" value={statusData.counts.today} />
-          <Stat icon={MessageSquare} label="Need attention" value={statusData.counts.needsReply} />
+          <Stat icon={MessageSquare} label="Needs attention" value={statusData.counts.needsReply} />
           <Stat icon={ShieldAlert} label="Junk review" value={statusData.counts.junkReview} />
         </div>
       </section>

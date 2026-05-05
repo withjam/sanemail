@@ -41,7 +41,7 @@ const goldenRecords = [
       callouts: [
         {
           kind: "new_attention",
-          label: "Need attention",
+          label: "Needs attention",
           title: "Can you review the lease renewal today",
           body:
             "Maya Chen appears to need a review. Time cue: tomorrow afternoon.",
@@ -49,7 +49,7 @@ const goldenRecords = [
         },
         {
           kind: "new_attention",
-          label: "Need attention",
+          label: "Needs attention",
           title: "Please sign the school trip form",
           body:
             "Jordan Rivera appears to need a signature. Time cue: by Friday.",
@@ -57,7 +57,7 @@ const goldenRecords = [
         },
         {
           kind: "new_attention",
-          label: "Need attention",
+          label: "Needs attention",
           title: "Dinner this weekend",
           body:
             "Alex Morgan appears to need a reply. Time cue: Saturday evening.",
@@ -65,7 +65,7 @@ const goldenRecords = [
         },
         {
           kind: "new_attention",
-          label: "Need attention",
+          label: "Needs attention",
           title: "Re: Contractor estimate for the porch",
           body:
             "Nina Patel appears to need a review. Time cue: by Monday.",
@@ -150,7 +150,7 @@ const goldenRecords = [
       callouts: [
         {
           kind: "carry_over",
-          label: "Need attention",
+          label: "Needs attention",
           title: "Can you review the lease renewal today",
           body:
             "Maya Chen appears to need a review. Time cue: tomorrow afternoon.",
@@ -158,7 +158,7 @@ const goldenRecords = [
         },
         {
           kind: "carry_over",
-          label: "Need attention",
+          label: "Needs attention",
           title: "Re: Contractor estimate for the porch",
           body:
             "Nina Patel appears to need a review. Time cue: by Monday.",
@@ -166,7 +166,7 @@ const goldenRecords = [
         },
         {
           kind: "new_attention",
-          label: "Need attention",
+          label: "Needs attention",
           title: "Please sign the school trip form",
           body:
             "Jordan Rivera appears to need a signature. Time cue: by Friday.",
@@ -174,7 +174,7 @@ const goldenRecords = [
         },
         {
           kind: "new_attention",
-          label: "Need attention",
+          label: "Needs attention",
           title: "Dinner this weekend",
           body:
             "Alex Morgan appears to need a reply. Time cue: Saturday evening.",

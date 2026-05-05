@@ -411,23 +411,12 @@ textarea {
 
 .briefing-callout-label {
   width: fit-content;
-  border: 1px solid var(--line);
+  border: 1px solid #b7e3d3;
   border-radius: 999px;
   padding: 3px 8px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.briefing-callout-label.new_attention {
-  border-color: #bfdbfe;
-  background: #eff6ff;
-  color: var(--accent);
-}
-
-.briefing-callout-label.carry_over {
-  border-color: #b7e3d3;
   background: var(--success-bg);
   color: var(--success);
+  font-size: 12px;
 }
 
 .home-tabs {

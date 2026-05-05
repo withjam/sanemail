@@ -125,7 +125,7 @@ const promptDefinitions = [
   },
   {
     id: "mail-briefing",
-    version: "2026-05-03.3",
+    version: "2026-05-05.1",
     stage: "briefing",
     title: "Inbox state briefing",
     description: "Summarize the status of my email inbox like you were my personal chief of staff",
@@ -167,9 +167,9 @@ const promptDefinitions = [
       messageIds: "string[]",
     },
     system:
-      "Summarize the status of my email inbox like you were my friendly, personal chief of staff. ",
+      "You are a personal chief of staff responsible for reviewing email messages and summarizing them in succinct, friendly, yet topical summaries.  Prefer action and insights to fluff and filler so that your boss can attack their day with confidence.",
     userTemplate:
-      "Let me know what requires my attention, what is likely upcoming, and remind me of anything I may be neglecting. Prefer recent messages to old messages, but take them into account to ensure I haven't forgotten anything important. Limit the specific callouts to 4 most recent or urgent. Give me a conversational summary, not a numeric regurgitation. Use this structured inbox context. Preserve messageId values exactly for linked callouts. Do not mention aggregate counts or system processing details.\n\nReturn JSON for the UI with this shape: {\"text\":\"brief conversational summary\",\"narrative\":{\"status\":\"main paragraph\",\"needToKnow\":\"optional supporting paragraph or empty string\",\"mightBeMissing\":\"optional reminder paragraph or empty string\",\"needsAttention\":\"optional attention paragraph or empty string\"},\"callouts\":[{\"kind\":\"attention|new_attention|carry_over\",\"label\":\"Need attention\",\"title\":\"email subject without trailing punctuation\",\"body\":\"one short human reason this item matters\",\"messageId\":\"source message id\",\"messageIds\":[\"source message id\"],\"priority\":1,\"deliveredAt\":\"ISO timestamp\"}],\"counts\":{},\"messageIds\":[\"source message id\"]}. Keep callouts to 4 or fewer and use linked message ids when calling out specific emails.\n\n{{context}}",
+      "Summarize the status of my email inbox like you were my friendly, personal chief of staff.  Let me know what requires my attention, what is likely upcoming, and remind me of anything I may be neglecting. Prefer recent messages to old messages, but take them into account to ensure I haven't forgotten anything important. Limit the specific callouts to 4 most recent or urgent. Give me a conversational summary, not a numeric regurgitation. Use this structured inbox context. Preserve messageId values exactly for linked callouts. Do not mention aggregate counts or system processing details.\n\nReturn JSON for the UI with this shape: {\"text\":\"brief conversational summary\",\"narrative\":{\"status\":\"main paragraph\",\"needToKnow\":\"optional supporting paragraph or empty string\",\"mightBeMissing\":\"optional reminder paragraph or empty string\",\"needsAttention\":\"optional attention paragraph or empty string\"},\"callouts\":[{\"kind\":\"attention|new_attention|carry_over\",\"label\":\"Needs attention\",\"title\":\"email subject without trailing punctuation\",\"body\":\"one short human reason this item matters\",\"messageId\":\"source message id\",\"messageIds\":[\"source message id\"],\"priority\":1,\"deliveredAt\":\"ISO timestamp\"}],\"counts\":{},\"messageIds\":[\"source message id\"]}. Keep callouts to 4 or fewer and use linked message ids when calling out specific emails.\n\n{{context}}",
   },
 ];
 

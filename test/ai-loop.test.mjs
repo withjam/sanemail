@@ -86,7 +86,7 @@ test("AI loop creates instrumented decisions over synthetic mail", () => {
   assert.equal(run.output.briefing.callouts.length, 4);
   assert.equal(run.output.briefing.callouts[0].messageId, "gmail:demo@example.com:message:demo-lease-review");
   assert.equal(run.output.briefing.callouts[0].kind, "new_attention");
-  assert.equal(run.output.briefing.callouts[0].label, "Need attention");
+  assert.equal(run.output.briefing.callouts[0].label, "Needs attention");
   assert.equal(run.spans.some((span) => span.name === "model.mock_inference"), true);
   assert.equal(lease.category, "Needs Reply");
   assert.equal(lease.extracted.actions.includes("review"), true);
@@ -124,7 +124,7 @@ test("golden aggregate prompt records evaluate day summary and category breakdow
   assert.equal(carryOverRun.output.briefing.counts.carriedOver, 2);
   assert.equal(carryOverRun.output.briefing.callouts.length, 4);
   assert.equal(carryOverRun.output.briefing.callouts[0].kind, "carry_over");
-  assert.equal(carryOverRun.output.briefing.callouts[0].label, "Need attention");
+  assert.equal(carryOverRun.output.briefing.callouts[0].label, "Needs attention");
 });
 
 test("iterative briefing selects new messages plus unresolved previous callouts", () => {

@@ -525,7 +525,7 @@ function buildBriefingCallouts({ needsReplyLast7, carryOver, previousBriefing })
     callouts.push({
       id: `callout-${decision.messageId}`,
       kind: "carry_over",
-      label: "Need attention",
+      label: "Needs attention",
       title: decision.subject.replace(/[?.!]+$/, ""),
       body: calloutBody(decision),
       messageId: decision.messageId,
@@ -541,7 +541,7 @@ function buildBriefingCallouts({ needsReplyLast7, carryOver, previousBriefing })
     callouts.push({
       id: `callout-${decision.messageId}`,
       kind: seenBefore ? "attention" : "new_attention",
-      label: "Need attention",
+      label: "Needs attention",
       title: decision.subject.replace(/[?.!]+$/, ""),
       body: calloutBody(decision),
       messageId: decision.messageId,
