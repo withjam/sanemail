@@ -190,7 +190,11 @@ test("iterative briefing selects new messages plus unresolved previous callouts"
 });
 
 test("daily brief cold-start context stays bounded while scoring hundreds of messages", () => {
-  const baseTime = new Date("2026-05-05T13:00:00.000Z").getTime();
+  // Anchor relative to "now" so the recency window (24h for `recent`, 168h for
+  // `last7Days`) keeps every fixture message in-window regardless of when the
+  // test is run. A hardcoded date used to work, then rotted as the wall clock
+  // moved past it.
+  const baseTime = Date.now();
   const messages = Array.from({ length: 220 }, (_item, index) => ({
     id: `${account.id}:message:bulk-${index}`,
     accountId: account.id,

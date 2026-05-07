@@ -12,14 +12,21 @@ import type {
   SyncResponse,
   SyntheticIngestionResponse,
 } from "@sanemail/shared/types";
+import { getCurrentAccessToken } from "./auth";
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers || {});
+  if (init?.body !== undefined && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  const token = getCurrentAccessToken();
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
   const response = await fetch(path, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
+    headers,
   });
 
   if (!response.ok) {
@@ -133,4 +140,18 @@ export function runAiVerification() {
     method: "POST",
     body: JSON.stringify({}),
   });
+}
+
+/**
+ * Asks the API for a Google OAuth redirect URL bound to the current user's
+ * session, then sends the browser there. We can't use a plain `<a href>` to
+ * /api/connect/gmail because regular link navigation does not carry the
+ * Authorization header — the API would reject it as unauthenticated.
+ */
+export async function startGmailConnect(): Promise<void> {
+  const { url } = await apiFetch<{ url: string }>("/api/connect/gmail/start", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  window.location.assign(url);
 }

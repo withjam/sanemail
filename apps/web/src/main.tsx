@@ -4,6 +4,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { registerSW } from "virtual:pwa-register";
+import { AuthGate, AuthProvider } from "./auth-provider";
 import { queryClient } from "./query";
 import { router } from "./router";
 import "./styles.css";
@@ -21,7 +22,11 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       client={queryClient}
       persistOptions={{ persister, maxAge: 1000 * 60 * 60 * 12 }}
     >
-      <RouterProvider router={router} />
+      <AuthProvider>
+        <AuthGate>
+          <RouterProvider router={router} />
+        </AuthGate>
+      </AuthProvider>
     </PersistQueryClientProvider>
   </React.StrictMode>,
 );

@@ -469,6 +469,20 @@ async function routeConnectGmail(userId, response) {
   redirect(response, buildGoogleAuthUrl(config, state));
 }
 
+// JSON variant of the connect flow: returns the Google OAuth URL so the
+// authenticated SPA can navigate to it. Necessary because a regular `<a href>`
+// click cannot carry the Authorization bearer header.
+async function routeConnectGmailStart(userId, response) {
+  const missing = validateGoogleConfig(config);
+  if (missing.length) {
+    sendJson(response, { error: "missing_google_config", missing }, 400);
+    return;
+  }
+  const state = crypto.randomUUID();
+  await saveOAuthState(state, userId);
+  sendJson(response, { url: buildGoogleAuthUrl(config, state) });
+}
+
 async function routeOAuthCallback(url, response) {
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
@@ -615,6 +629,9 @@ async function handleApi(url, request, response) {
     return routeAiClassifyUnclassified(userId, request, response);
   }
   if (request.method === "GET" && url.pathname === "/api/connect/gmail") return routeConnectGmail(userId, response);
+  if (request.method === "POST" && url.pathname === "/api/connect/gmail/start") {
+    return routeConnectGmailStart(userId, response);
+  }
 
   if (messageMatch) {
     const messageId = decodeURIComponent(messageMatch[1]);

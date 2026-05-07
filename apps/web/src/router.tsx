@@ -63,13 +63,16 @@ import {
   runAiVerification,
   resetDemoData,
   saveFeedback,
+  startGmailConnect,
   synthesizeIngestionBatch,
   syncGmail,
   syncMock,
 } from "./api";
 import type { AiRunMode } from "./api";
+import { useAuth } from "./auth-provider";
 import { useOnlineStatus } from "./hooks";
 import { queryClient, queryKeys } from "./query";
+import { LogOut } from "lucide-react";
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en", {
@@ -169,6 +172,7 @@ function Shell() {
             <span>{online ? "Online" : "Offline cache"}</span>
           </div>
           <SidebarSourcesSummary status={status.data} />
+          <SidebarIdentity />
         </div>
       </aside>
       <div className="main-column">
@@ -183,6 +187,55 @@ function Shell() {
           <Outlet />
         </main>
       </div>
+    </div>
+  );
+}
+
+function ConnectGmailButton({
+  label,
+  icon: Icon,
+  testId,
+}: {
+  label: string;
+  icon: typeof Mail;
+  testId: string;
+}) {
+  const mutation = useMutation({ mutationFn: startGmailConnect });
+  return (
+    <button
+      type="button"
+      className="button primary"
+      onClick={() => mutation.mutate()}
+      disabled={mutation.isPending}
+      data-testid={testId}
+    >
+      {mutation.isPending ? <Loader2 className="spin" size={16} /> : <Icon size={16} />}
+      {label}
+    </button>
+  );
+}
+
+function SidebarIdentity() {
+  const { authConfigured, email, signOut } = useAuth();
+  if (!authConfigured) {
+    return (
+      <div className="account-line" data-testid="sidebar-identity-dev">
+        <span className="muted">Dev mode (no auth)</span>
+      </div>
+    );
+  }
+  return (
+    <div className="account-line" data-testid="sidebar-identity">
+      <span className="muted" title={email || ""}>{email || "Signed in"}</span>
+      <button
+        type="button"
+        className="sidebar-manage-link"
+        onClick={() => void signOut()}
+        data-testid="sidebar-sign-out"
+      >
+        <LogOut size={12} />
+        Sign out
+      </button>
     </div>
   );
 }
@@ -398,6 +451,7 @@ function emptyForHomeTab(tab: "mostRecent" | "needsReply" | "upcoming") {
 }
 
 function ConnectPanel({ missing }: { missing: string[] }) {
+  const connectMutation = useMutation({ mutationFn: startGmailConnect });
   return (
     <section className="callout">
       <div>
@@ -408,10 +462,15 @@ function ConnectPanel({ missing }: { missing: string[] }) {
             : "Connect Gmail to import messages without changing the Gmail mailbox."}
         </p>
       </div>
-      <a className="button primary" href="/api/connect/gmail">
-        <Mail size={17} />
+      <button
+        type="button"
+        className="button primary"
+        onClick={() => connectMutation.mutate()}
+        disabled={connectMutation.isPending}
+      >
+        {connectMutation.isPending ? <Loader2 className="spin" size={17} /> : <Mail size={17} />}
         Connect
-      </a>
+      </button>
     </section>
   );
 }
@@ -1239,14 +1298,11 @@ function SettingsRoute() {
                         Needs config: {configMissing.join(", ")}
                       </span>
                     ) : (
-                      <a
-                        className="button primary"
-                        href="/api/connect/gmail"
-                        data-testid="settings-connect-gmail"
-                      >
-                        <Plus size={16} />
-                        Connect {source.entry.label}
-                      </a>
+                      <ConnectGmailButton
+                        label={`Connect ${source.entry.label}`}
+                        icon={Plus}
+                        testId="settings-connect-gmail"
+                      />
                     )
                   ) : (
                     <span className="pill">Built-in</span>
@@ -1403,14 +1459,7 @@ function SourceConnectionCard({
           blockedByConfig ? (
             <span className="muted">Add Google credentials and restart the API to enable.</span>
           ) : (
-            <a
-              className="button primary"
-              href="/api/connect/gmail"
-              data-testid="source-connect-gmail"
-            >
-              <Plug size={16} />
-              Connect
-            </a>
+            <ConnectGmailButton label="Connect" icon={Plug} testId="source-connect-gmail" />
           )
         )}
       </div>
