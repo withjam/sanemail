@@ -109,6 +109,8 @@ export function loadConfig() {
     sync: {
       messageLimit: Number(process.env.SYNC_MESSAGE_LIMIT || 50),
       query: process.env.SYNC_QUERY || "newer_than:90d -in:chats",
+      backfillMessageLimit: Number(process.env.SYNC_BACKFILL_MESSAGE_LIMIT || process.env.SYNC_MESSAGE_LIMIT || 50),
+      backfillCutoffDays: Number(process.env.SYNC_BACKFILL_CUTOFF_DAYS || 90),
     },
     queue: {
       driver: process.env.QUEUE_DRIVER || "local-json",

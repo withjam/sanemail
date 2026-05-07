@@ -50,6 +50,7 @@ async function handleSourceSync(job) {
     accountId: payload.accountId,
     provider: payload.provider,
     trigger: payload.trigger || "manual",
+    cursorHint: payload.cursorHint || "latest",
   });
   const queued = await maybeEnqueuePostIngestClassification(account);
 

@@ -227,3 +227,27 @@ export async function syncRecentMessages(config, account) {
 
   return messages;
 }
+
+function yyyymmdd(date) {
+  const value = new Date(date);
+  const year = value.getUTCFullYear();
+  const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(value.getUTCDate()).padStart(2, "0");
+  return `${year}/${month}/${day}`;
+}
+
+export async function syncBackfillOlderMessages(config, account, { beforeDate } = {}) {
+  if (!beforeDate) throw new Error("syncBackfillOlderMessages requires beforeDate");
+  const query = `${config.sync.query} before:${yyyymmdd(beforeDate)}`.trim();
+  const ids = await listRecentMessageIds(account, {
+    limit: config.sync.backfillMessageLimit || config.sync.messageLimit,
+    query,
+  });
+
+  const messages = [];
+  for (const item of ids) {
+    const gmailMessage = await getMessage(account, item.id);
+    messages.push(normalizeGmailMessage(account, gmailMessage));
+  }
+  return messages;
+}

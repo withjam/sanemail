@@ -42,6 +42,7 @@ import {
 } from "./store.mjs";
 import { getClassifiedMessages } from "./classifier.mjs";
 import { listQueueJobs } from "./queue.mjs";
+import { enqueueJob } from "./queue.mjs";
 import { resetDemoData } from "./demo-data.mjs";
 import { syncSourceConnection } from "./source-sync.mjs";
 import { synthesizeIngestionBatch } from "./synthetic-ingestion.mjs";
@@ -363,6 +364,63 @@ async function routeSyncGmail(userId, response) {
   sendJson(response, { ok: true, result, briefRun, ...(queued ? { queued } : {}) });
 }
 
+async function routeQueueGmailSync(userId, response) {
+  const store = await readStoreFor(userId);
+  const gmailAccount = (store.accounts || []).find((account) => account?.provider === "gmail") || null;
+  if (!gmailAccount) {
+    sendJson(response, { error: "gmail_not_connected", message: "No Gmail account is connected." }, 400);
+    return;
+  }
+
+  const queued = await enqueueJob("source.sync", {
+    userId,
+    sourceConnectionId: gmailAccount.id,
+    provider: "gmail",
+    trigger: "manual",
+    cursorHint: "latest",
+    requestedAt: new Date().toISOString(),
+  });
+  sendJson(response, { ok: true, queued });
+}
+
+async function routeQueueGmailBackfill(userId, response) {
+  const store = await readStoreFor(userId);
+  const gmailAccount = (store.accounts || []).find((account) => account?.provider === "gmail") || null;
+  if (!gmailAccount) {
+    sendJson(response, { error: "gmail_not_connected", message: "No Gmail account is connected." }, 400);
+    return;
+  }
+
+  const queued = await enqueueJob("source.sync", {
+    userId,
+    sourceConnectionId: gmailAccount.id,
+    provider: "gmail",
+    trigger: "backfill",
+    cursorHint: "backfill_older",
+    requestedAt: new Date().toISOString(),
+  });
+  sendJson(response, { ok: true, queued });
+}
+
+async function routeDirectGmailIngest(userId, response, { cursorHint, trigger }) {
+  const store = await readStoreFor(userId);
+  const gmailAccount = (store.accounts || []).find((account) => account?.provider === "gmail") || null;
+  if (!gmailAccount) {
+    sendJson(response, { error: "gmail_not_connected", message: "No Gmail account is connected." }, 400);
+    return;
+  }
+
+  const { account, result } = await syncSourceConnection({
+    userId,
+    sourceConnectionId: gmailAccount.id,
+    provider: "gmail",
+    trigger,
+    cursorHint,
+  });
+  const queued = await maybeEnqueuePostIngestClassification(account);
+  sendJson(response, { ok: true, result, ...(queued ? { queued } : {}) });
+}
+
 async function routeDisconnect(userId, response) {
   await clearUserData(userId);
   sendJson(response, { ok: true });
@@ -654,6 +712,14 @@ async function handleApi(url, request, response) {
   if (request.method === "GET" && url.pathname === "/api/today") return routeToday(userId, response);
   if (request.method === "POST" && url.pathname === "/api/sync/gmail") return routeSyncGmail(userId, response);
   if (request.method === "POST" && url.pathname === "/api/sync/mock") return routeSyncMock(userId, response);
+  if (request.method === "POST" && url.pathname === "/api/queue/sync/gmail") return routeQueueGmailSync(userId, response);
+  if (request.method === "POST" && url.pathname === "/api/queue/backfill/gmail") return routeQueueGmailBackfill(userId, response);
+  if (request.method === "POST" && url.pathname === "/api/ingest/gmail/next") {
+    return routeDirectGmailIngest(userId, response, { cursorHint: "latest", trigger: "manual" });
+  }
+  if (request.method === "POST" && url.pathname === "/api/ingest/gmail/backfill") {
+    return routeDirectGmailIngest(userId, response, { cursorHint: "backfill_older", trigger: "backfill" });
+  }
   if (request.method === "POST" && url.pathname === "/api/disconnect") return routeDisconnect(userId, response);
   if (request.method === "POST" && url.pathname === "/api/demo/reset") return routeDemoReset(userId, response);
   if (request.method === "POST" && url.pathname === "/api/demo/clear") return routeDemoClear(userId, response);

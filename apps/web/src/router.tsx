@@ -64,6 +64,8 @@ import {
   getRecentClassifications,
   getStatus,
   getToday,
+  backfillOlderGmailBatch,
+  ingestNextGmailBatch,
   runDailyBrief,
   runAiVerification,
   resetDemoData,
@@ -1312,6 +1314,14 @@ function SettingsRoute() {
     mutationFn: syncGmail,
     onSuccess: () => void queryClient.invalidateQueries(),
   });
+  const ingestNextGmailMutation = useMutation({
+    mutationFn: ingestNextGmailBatch,
+    onSuccess: () => void queryClient.invalidateQueries(),
+  });
+  const backfillOlderGmailMutation = useMutation({
+    mutationFn: backfillOlderGmailBatch,
+    onSuccess: () => void queryClient.invalidateQueries(),
+  });
   const syncMockMutation = useMutation({
     mutationFn: syncMock,
     onSuccess: () => void queryClient.invalidateQueries(),
@@ -1385,12 +1395,16 @@ function SettingsRoute() {
               gmailReadonly={statusData.gmailReadonly}
               configMissing={configMissing}
               syncGmailPending={syncGmailMutation.isPending}
+              queueGmailPending={ingestNextGmailMutation.isPending}
+              backfillGmailPending={backfillOlderGmailMutation.isPending}
               syncMockPending={syncMockMutation.isPending}
               disconnectPending={disconnectMutation.isPending}
               demoResetPending={demoResetMutation.isPending}
               demoClearPending={demoClearMutation.isPending}
               hasGmail={hasGmail}
               onSyncGmail={() => syncGmailMutation.mutate()}
+              onQueueGmail={() => ingestNextGmailMutation.mutate()}
+              onBackfillGmail={() => backfillOlderGmailMutation.mutate()}
               onSyncMock={() => syncMockMutation.mutate()}
               onDisconnect={() => disconnectMutation.mutate()}
               onResetDemo={() => demoResetMutation.mutate()}
@@ -1495,12 +1509,16 @@ function SourceConnectionCard({
   gmailReadonly,
   configMissing,
   syncGmailPending,
+  queueGmailPending,
+  backfillGmailPending,
   syncMockPending,
   disconnectPending,
   demoResetPending,
   demoClearPending,
   hasGmail,
   onSyncGmail,
+  onQueueGmail,
+  onBackfillGmail,
   onSyncMock,
   onDisconnect,
   onResetDemo,
@@ -1510,12 +1528,16 @@ function SourceConnectionCard({
   gmailReadonly: string;
   configMissing: string[];
   syncGmailPending: boolean;
+  queueGmailPending: boolean;
+  backfillGmailPending: boolean;
   syncMockPending: boolean;
   disconnectPending: boolean;
   demoResetPending: boolean;
   demoClearPending: boolean;
   hasGmail: boolean;
   onSyncGmail: () => void;
+  onQueueGmail: () => void;
+  onBackfillGmail: () => void;
   onSyncMock: () => void;
   onDisconnect: () => void;
   onResetDemo: () => void;
@@ -1605,6 +1627,26 @@ function SourceConnectionCard({
             >
               {syncGmailPending ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
               Sync
+            </button>
+            <button
+              className="button"
+              onClick={onQueueGmail}
+              disabled={queueGmailPending}
+              data-testid="source-queue-sync-gmail"
+              title="Enqueue the next Gmail ingestion batch (runs via the worker)."
+            >
+              {queueGmailPending ? <Loader2 className="spin" size={16} /> : <Archive size={16} />}
+              Ingest next batch
+            </button>
+            <button
+              className="button"
+              onClick={onBackfillGmail}
+              disabled={backfillGmailPending}
+              data-testid="source-backfill-gmail"
+              title="Enqueue one backfill batch (older messages) until the cutoff is reached."
+            >
+              {backfillGmailPending ? <Loader2 className="spin" size={16} /> : <Archive size={16} />}
+              Backfill older
             </button>
             <button
               className="button danger-button"

@@ -81,6 +81,34 @@ export function syncGmail() {
   });
 }
 
+export function queueGmailSync() {
+  return apiFetch<{ ok: true; queued: SyncResponse["queued"] }>("/api/queue/sync/gmail", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function queueGmailBackfillOlder() {
+  return apiFetch<{ ok: true; queued: SyncResponse["queued"] }>("/api/queue/backfill/gmail", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function ingestNextGmailBatch() {
+  return apiFetch<SyncResponse>("/api/ingest/gmail/next", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function backfillOlderGmailBatch() {
+  return apiFetch<SyncResponse>("/api/ingest/gmail/backfill", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 export function syncMock() {
   return apiFetch<DemoResetResponse>("/api/sync/mock", {
     method: "POST",
