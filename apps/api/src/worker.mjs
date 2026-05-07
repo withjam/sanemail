@@ -2,7 +2,7 @@ import { pathToFileURL } from "node:url";
 import { run, runOnce } from "graphile-worker";
 import { loadConfig } from "./config.mjs";
 import { claimNextJob, completeJob, failJob } from "./queue.mjs";
-import { runAiLoop } from "./ai/pipeline.mjs";
+import { runClassificationBatch, runDailyBrief } from "./ai/pipeline.mjs";
 import { syncSourceConnection } from "./source-sync.mjs";
 import { maybeEnqueuePostIngestClassification } from "./post-ingest-jobs.mjs";
 
@@ -17,13 +17,20 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function requireJobUserId(job) {
+  const userId = job.payload?.userId;
+  if (!userId) {
+    throw new Error(`Job ${job.name} is missing required userId in payload`);
+  }
+  return userId;
+}
+
 async function handleClassificationBatch(job) {
   const payload = job.payload || {};
-  const run = await runAiLoop({
+  const userId = requireJobUserId(job);
+  const run = await runClassificationBatch({
+    userId,
     limit: payload.maxBatchSize,
-    mode: "iterative",
-    briefingOnly: false,
-    generateBriefing: false,
     trigger: "queue:classification.batch",
   });
 
@@ -36,7 +43,9 @@ async function handleClassificationBatch(job) {
 
 async function handleSourceSync(job) {
   const payload = job.payload || {};
+  const userId = requireJobUserId(job);
   const { account, result, provider, trigger } = await syncSourceConnection({
+    userId,
     sourceConnectionId: payload.sourceConnectionId,
     accountId: payload.accountId,
     provider: payload.provider,
@@ -56,9 +65,10 @@ async function handleSourceSync(job) {
 
 async function handleBriefGenerate(job) {
   const payload = job.payload || {};
-  const run = await runAiLoop({
+  const userId = requireJobUserId(job);
+  const run = await runDailyBrief({
+    userId,
     mode: "iterative",
-    briefingOnly: true,
     trigger: `queue:brief.generate:${payload.scopeType || "all_sources"}`,
   });
 

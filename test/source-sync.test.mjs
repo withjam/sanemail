@@ -24,8 +24,11 @@ test("source.sync worker can manually sync the mock source without chaining jobs
     const worker = await import(`../apps/api/src/worker.mjs?sourceSync=${encodeURIComponent(dataDir)}`);
     await store.clearLocalData();
 
+    const userId = "test-user-source-sync";
+    await store.ensureUserRecord(userId, "test@example.com");
     await queue.enqueueJob("source.sync", {
-      sourceConnectionId: "mock:demo@example.com",
+      userId,
+      sourceConnectionId: `mock:demo:${userId}`,
       provider: "mock",
       trigger: "manual",
       requestedAt: new Date().toISOString(),

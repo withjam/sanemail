@@ -1,4 +1,4 @@
-import { clearLocalData, upsertAccount, upsertSyncedMessages } from "./store.mjs";
+import { clearUserData, upsertAccount, upsertSyncedMessages } from "./store.mjs";
 
 export const DEMO_MESSAGE_COUNT = 200;
 export const MOCK_SOURCE_ACCOUNT = {
@@ -10,6 +10,18 @@ export const MOCK_SOURCE_ACCOUNT = {
   historyId: "mock-history",
   demo: true,
 };
+
+export function mockSourceAccountFor(userId) {
+  return {
+    id: `mock:demo:${userId}`,
+    userId,
+    provider: "mock",
+    email: "demo@example.com",
+    scope: "mock.read",
+    historyId: "mock-history",
+    demo: true,
+  };
+}
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -665,13 +677,15 @@ export function buildDemoMessages(account, baseTime = Date.now()) {
   return buildGoldenDemoInputs().map((input) => demoMessage(account, baseTime, input));
 }
 
-export async function resetDemoData() {
-  await clearLocalData();
-  return syncMockSource();
+export async function resetDemoData({ userId } = {}) {
+  if (!userId) throw new Error("resetDemoData requires a userId");
+  await clearUserData(userId);
+  return syncMockSource({ userId });
 }
 
-export async function syncMockSource({ baseTime = Date.now() } = {}) {
-  const account = await upsertAccount(MOCK_SOURCE_ACCOUNT);
+export async function syncMockSource({ userId, baseTime = Date.now() } = {}) {
+  if (!userId) throw new Error("syncMockSource requires a userId");
+  const account = await upsertAccount(mockSourceAccountFor(userId));
   const messages = buildDemoMessages(account, baseTime);
   const result = await upsertSyncedMessages(account, messages);
   return { account, result };

@@ -61,8 +61,10 @@ export function loadConfig() {
   const webOrigin = process.env.WEB_ORIGIN || appOrigin;
   const databaseUrl = buildDatabaseUrl();
   const ollamaModel = process.env.OLLAMA_MODEL || process.env.AI_MODEL || "deepseek-v4-pro:cloud";
+  const env = (process.env.NODE_ENV || "development").toLowerCase();
 
   return {
+    env,
     port,
     host: process.env.HOST || "127.0.0.1",
     appOrigin,
@@ -82,6 +84,19 @@ export function loadConfig() {
       appSecret: process.env.APP_SECRET || "",
       encryptionKey: process.env.ENCRYPTION_KEY || "",
       encryptionKeyVersion: process.env.ENCRYPTION_KEY_VERSION || "local-v1",
+    },
+    auth: {
+      jwtSecret:
+        process.env.SUPABASE_JWT_SECRET ||
+        process.env.AUTH_JWT_SECRET ||
+        "",
+      jwtIssuer: process.env.SUPABASE_JWT_ISSUER || process.env.AUTH_JWT_ISSUER || "",
+      jwtAudience:
+        process.env.SUPABASE_JWT_AUDIENCE ||
+        process.env.AUTH_JWT_AUDIENCE ||
+        "authenticated",
+      devUserId: process.env.DEV_USER_ID || "",
+      devUserEmail: process.env.DEV_USER_EMAIL || "",
     },
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID || "",
@@ -151,6 +166,14 @@ export function validateSecurityConfig(config) {
     !config.security.encryptionKey
   ) {
     missing.push("APP_SECRET");
+  }
+
+  const inProd = config.env === "production";
+  if (inProd && !config.auth.jwtSecret) {
+    missing.push("SUPABASE_JWT_SECRET");
+  }
+  if (inProd && config.auth.devUserId) {
+    missing.push("DEV_USER_ID_must_not_be_set_in_production");
   }
   return missing;
 }

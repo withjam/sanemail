@@ -271,6 +271,44 @@ export type DemoResetResponse = SyncResponse & {
   account: AccountSummary;
 };
 
+export type ClassificationBacklogSummary = {
+  total: number;
+  pending: number;
+  stale: number;
+  failed: number;
+  classified: number;
+  backlog: number;
+  newestPriorityAt: string | null;
+  oldestPriorityAt: string | null;
+};
+
+export type SyntheticIngestionResponse = SyncResponse & {
+  account: AccountSummary;
+  batch: {
+    id: string;
+    source: string;
+    generator: string;
+    count: number;
+    messageIds: string[];
+    subjects: string[];
+    newestReceivedAt: string | null;
+    oldestReceivedAt: string | null;
+    createdAt: string;
+  };
+  analytics: {
+    messagesSynthesized: number;
+    inserted: number;
+    updated: number;
+    synthesisLatencyMs: number;
+    ingestLatencyMs: number;
+    totalLatencyMs: number;
+    totalRouteLatencyMs?: number;
+    classificationSkipped: boolean;
+    briefingSkipped: boolean;
+  };
+  classificationBacklog: ClassificationBacklogSummary;
+};
+
 export type AiPromptRecord = {
   id: string;
   version: string;
@@ -584,8 +622,13 @@ export type AiControlResponse = {
   evals: AiEvalRecord[];
   observability: PhoenixObservabilityStatus;
   latestRun: AiRun | null;
+  latestClassificationRun?: AiRun | null;
   runs: AiRun[];
   queueJobs?: QueueJobSummary[];
+  ingestion?: {
+    classificationBacklog: ClassificationBacklogSummary;
+    latestClassificationRun: AiRun | null;
+  };
   latestVerification: AiVerificationRun | null;
   verificationRuns: AiVerificationRun[];
 };
@@ -593,6 +636,19 @@ export type AiControlResponse = {
 export type AiRunResponse = {
   ok: true;
   run: AiRun;
+};
+
+export type AiClassificationRunResponse = AiRunResponse & {
+  classificationBacklog: {
+    before: ClassificationBacklogSummary;
+    after: ClassificationBacklogSummary;
+  };
+  analytics: {
+    messagesProcessed: number;
+    latencyMs: number;
+    briefingGenerated: boolean;
+    llmCalls: number;
+  };
 };
 
 export type AiVerificationResponse = {

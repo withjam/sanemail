@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { runAiLoop } from "./ai/pipeline.mjs";
+import { runDailyBrief } from "./ai/pipeline.mjs";
 import { loadConfig } from "./config.mjs";
 
 const debug = process.argv.includes("--debug") || ["1", "true", "yes", "on"].includes(String(process.env.AI_DEBUG || "").toLowerCase());
@@ -55,7 +55,7 @@ debugLog("resolved configuration", {
 
 let run;
 try {
-  run = await runAiLoop({ limit, mode, trigger: "cli" });
+  run = await runDailyBrief({ limit, mode, trigger: "cli" });
 } catch (error) {
   if (debug) {
     console.error("[ai:run debug] run failed");

@@ -1,5 +1,6 @@
 import type {
   AiControlResponse,
+  AiClassificationRunResponse,
   AiRunResponse,
   AiVerificationResponse,
   FeedbackKind,
@@ -9,6 +10,7 @@ import type {
   MessagesResponse,
   StatusResponse,
   SyncResponse,
+  SyntheticIngestionResponse,
 } from "@sanemail/shared/types";
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -100,11 +102,27 @@ export interface RunAiLoopOptions {
   limit?: number;
 }
 
-export function runAiLoop({ mode = "auto", limit }: RunAiLoopOptions = {}) {
+export function runDailyBrief({ mode = "auto", limit }: RunAiLoopOptions = {}) {
   const body: { mode?: AiRunMode; limit?: number } = {};
   if (mode !== "auto") body.mode = mode;
   if (typeof limit === "number" && Number.isFinite(limit) && limit > 0) body.limit = limit;
   return apiFetch<AiRunResponse>("/api/ai/run", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function synthesizeIngestionBatch() {
+  return apiFetch<SyntheticIngestionResponse>("/api/ai/ingestion/synthesize", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function classifyUnclassifiedMessages({ limit }: { limit?: number } = {}) {
+  const body: { limit?: number } = {};
+  if (typeof limit === "number" && Number.isFinite(limit) && limit > 0) body.limit = limit;
+  return apiFetch<AiClassificationRunResponse>("/api/ai/ingestion/classify", {
     method: "POST",
     body: JSON.stringify(body),
   });

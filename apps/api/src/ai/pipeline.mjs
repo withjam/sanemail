@@ -1,7 +1,13 @@
 import crypto from "node:crypto";
 import { loadConfig } from "../config.mjs";
 import { applyFeedbackToClassification, classifyMessage } from "../classifier.mjs";
-import { getPrimaryAccount, latestInboxBriefing, readStore, recordAiRun } from "../store.mjs";
+import {
+  getPrimarySourceConnection,
+  latestInboxBriefing,
+  readStoreFor,
+  recordAiRun,
+  selectMessagesForClassificationBatch,
+} from "../store.mjs";
 import { classifyWithOllama, generateBriefingWithOllama } from "./ollama.mjs";
 import { traceAiRun } from "./phoenix.mjs";
 import { getPromptSnapshots, hashValue, renderPrompt } from "./prompts.mjs";
@@ -1380,15 +1386,17 @@ async function applyOllamaProvider(
 }
 
 export async function runAiLoop({
+  userId,
   limit,
   trigger = "manual",
   mode,
   briefingOnly = true,
   generateBriefing = true,
 } = {}) {
+  if (!userId) throw new Error("runAiLoop requires a userId");
   const config = loadConfig();
-  const store = await readStore();
-  const account = (await getPrimaryAccount()) || store.accounts[0] || null;
+  const store = await readStoreFor(userId);
+  const account = (await getPrimarySourceConnection(userId)) || store.accounts[0] || null;
   const effectiveLimit = boundedMessageLimit(limit, config);
   const allMessages = [...(store.messages || [])]
     .filter((message) => !account?.id || message.accountId === account.id)
@@ -1409,14 +1417,27 @@ export async function runAiLoop({
     ? allMessages.filter((message) => !isJunkMessage(message))
     : allMessages;
   const junkFiltered = allMessages.length - nonJunkMessages.length;
-  const previousBriefing = latestInboxBriefing(store, account?.id);
-  const selection = selectMessagesForBriefing({
-    messages: nonJunkMessages,
-    feedback: store.feedback,
-    previousBriefing,
-    mode: mode || config.ai.briefingMode,
-    limit: effectiveLimit,
-  });
+  const previousBriefing = latestInboxBriefing(store, userId);
+  const classificationSelection = !generateBriefing;
+  const selection = classificationSelection
+    ? {
+        mode: "classification_batch",
+        selected: selectMessagesForClassificationBatch(store, account, effectiveLimit),
+        newMessages: [],
+        carryOverMessages: [],
+        since: null,
+        previousBriefingId: null,
+        previousGeneratedAt: null,
+        resolvedPreviousMessageIds: [],
+        unresolvedPreviousMessageIds: [],
+      }
+    : selectMessagesForBriefing({
+        messages: nonJunkMessages,
+        feedback: store.feedback,
+        previousBriefing,
+        mode: mode || config.ai.briefingMode,
+        limit: effectiveLimit,
+      });
   const messages = selection.selected;
   const contextBriefing = selection.mode === "iterative" ? previousBriefing : null;
   aiDebugLog("ollama run", {
@@ -1448,7 +1469,7 @@ export async function runAiLoop({
     kind: generateBriefing ? "daily-brief" : "classification-batch",
     includeBriefing: generateBriefing,
     previousBriefing: contextBriefing,
-    briefingSelection: selection,
+    briefingSelection: generateBriefing ? selection : null,
   });
   run.promptRefs = getPromptSnapshots({
     "mail-message-classification": {
@@ -1501,4 +1522,38 @@ export async function runAiLoop({
   run.observability = await traceAiRun(run);
   await recordAiRun(run);
   return run;
+}
+
+/**
+ * Daily brief pipeline. Selects non-junk messages, builds the deterministic feature
+ * store, then issues a single LLM call to draft the brief. Idempotent — each call
+ * persists a new run with kind="daily-brief".
+ */
+export async function runDailyBrief({ userId, limit, mode, trigger = "manual" } = {}) {
+  if (!userId) throw new Error("runDailyBrief requires a userId");
+  return runAiLoop({
+    userId,
+    limit,
+    mode,
+    trigger,
+    briefingOnly: true,
+    generateBriefing: true,
+  });
+}
+
+/**
+ * Classification batch pipeline. Selects messages from the classification backlog
+ * (pending/stale/failed), runs them through the classification LLM (or deterministic
+ * fallback if classification LLM is disabled), and updates classificationState. Does
+ * not generate or persist a brief. Each call persists a run with kind="classification-batch".
+ */
+export async function runClassificationBatch({ userId, limit, trigger = "manual" } = {}) {
+  if (!userId) throw new Error("runClassificationBatch requires a userId");
+  return runAiLoop({
+    userId,
+    limit,
+    trigger,
+    briefingOnly: false,
+    generateBriefing: false,
+  });
 }

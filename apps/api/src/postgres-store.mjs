@@ -244,6 +244,34 @@ export async function getPrimaryAccount() {
   });
 }
 
+export async function getPrimarySourceConnection(userId) {
+  if (!userId) throw new Error("getPrimarySourceConnection requires a userId");
+  return withClient(async (client) => {
+    const result = await client.query(
+      `
+        select sc.*, sas.encrypted_payload
+        from source_connections sc
+        left join source_auth_secrets sas
+          on sas.source_connection_id = sc.id
+         and sas.secret_kind = 'oauth_tokens'
+        where sc.deleted_at is null
+          and sc.status <> 'deleted'
+          and sc.user_id = $1
+        order by sc.created_at asc
+        limit 1
+      `,
+      [userId],
+    );
+    return result.rows[0] ? accountFromRow(result.rows[0]) : null;
+  });
+}
+
+export async function ensureUserRecord(userId, email = null) {
+  if (!userId) throw new Error("ensureUserRecord requires a userId");
+  await withClient((client) => ensureUser(client, userId, email));
+  return { id: userId, primaryEmail: email };
+}
+
 function messageInputHash(message = {}) {
   return hashValue({
     subject: message.subject,
@@ -573,6 +601,34 @@ async function verificationRunRows(client, limit = 100) {
   return result.rows.map((row) => row.run);
 }
 
+async function classificationStateRows(client) {
+  const result = await client.query(
+    `
+      select message_id, user_id, state, priority_at, attempt_count,
+             next_attempt_at, last_classified_at, current_classification_id,
+             classifier_version, input_hash, last_error, created_at, updated_at
+      from message_classification_state
+      order by priority_at desc
+    `,
+  );
+  return result.rows.map((row) => ({
+    messageId: row.message_id,
+    userId: row.user_id,
+    accountId: row.user_id,
+    state: row.state,
+    priorityAt: row.priority_at?.toISOString?.() || row.priority_at,
+    attemptCount: row.attempt_count,
+    nextAttemptAt: row.next_attempt_at?.toISOString?.() || row.next_attempt_at,
+    lastClassifiedAt: row.last_classified_at?.toISOString?.() || row.last_classified_at,
+    currentClassificationId: row.current_classification_id,
+    classifierVersion: row.classifier_version,
+    inputHash: row.input_hash,
+    lastError: row.last_error,
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+    updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
+  }));
+}
+
 async function briefingRows(client, limit = 50) {
   const result = await client.query(
     `
@@ -605,6 +661,198 @@ async function briefingRows(client, limit = 50) {
   }));
 }
 
+async function accountRowsForUser(client, userId) {
+  const result = await client.query(
+    `
+      select sc.*, sas.encrypted_payload
+      from source_connections sc
+      left join source_auth_secrets sas
+        on sas.source_connection_id = sc.id
+       and sas.secret_kind = 'oauth_tokens'
+      where sc.deleted_at is null
+        and sc.status <> 'deleted'
+        and sc.user_id = $1
+      order by sc.created_at asc
+    `,
+    [userId],
+  );
+  return result.rows.map(accountFromRow);
+}
+
+async function messageRowsForUser(client, userId) {
+  const result = await client.query(
+    `
+      select distinct on (m.id)
+        m.*,
+        msr.source_connection_id,
+        msr.provider,
+        msr.provider_message_id,
+        msr.provider_thread_id,
+        msr.provider_labels,
+        msr.provider_history_id,
+        msr.source_metadata,
+        mb.encrypted_body
+      from messages m
+      left join message_source_refs msr on msr.message_id = m.id
+      left join message_bodies mb on mb.message_id = m.id
+      where m.deleted_at is null
+        and m.user_id = $1
+      order by m.id, m.received_at desc
+    `,
+    [userId],
+  );
+  return result.rows.map(messageFromRow).sort(
+    (a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime(),
+  );
+}
+
+async function threadRowsForUser(client, userId) {
+  const result = await client.query(
+    `
+      select id, user_id, subject_normalized, last_message_at, message_count, created_at, updated_at
+      from threads
+      where user_id = $1
+      order by last_message_at desc nulls last
+    `,
+    [userId],
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    accountId: row.user_id,
+    subject: row.subject_normalized,
+    lastMessageAt: row.last_message_at?.toISOString?.() || row.last_message_at,
+    messageCount: row.message_count,
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+    updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
+  }));
+}
+
+async function feedbackRowsForUser(client, userId) {
+  const result = await client.query(
+    `
+      select id, user_id, message_id, kind, metadata, created_at
+      from feedback
+      where user_id = $1
+      order by created_at desc
+    `,
+    [userId],
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    userId: row.user_id,
+    messageId: row.message_id,
+    kind: row.kind,
+    metadata: row.metadata || {},
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+  }));
+}
+
+async function aiRunRowsForUser(client, userId, limit = 100) {
+  const result = await client.query(
+    `
+      select run
+      from ai_runs
+      where user_id = $1
+      order by created_at desc
+      limit $2
+    `,
+    [userId, limit],
+  );
+  return result.rows.map((row) => row.run);
+}
+
+async function classificationStateRowsForUser(client, userId) {
+  const result = await client.query(
+    `
+      select message_id, user_id, state, priority_at, attempt_count,
+             next_attempt_at, last_classified_at, current_classification_id,
+             classifier_version, input_hash, last_error, created_at, updated_at
+      from message_classification_state
+      where user_id = $1
+      order by priority_at desc
+    `,
+    [userId],
+  );
+  return result.rows.map((row) => ({
+    messageId: row.message_id,
+    userId: row.user_id,
+    accountId: row.user_id,
+    state: row.state,
+    priorityAt: row.priority_at?.toISOString?.() || row.priority_at,
+    attemptCount: row.attempt_count,
+    nextAttemptAt: row.next_attempt_at?.toISOString?.() || row.next_attempt_at,
+    lastClassifiedAt: row.last_classified_at?.toISOString?.() || row.last_classified_at,
+    currentClassificationId: row.current_classification_id,
+    classifierVersion: row.classifier_version,
+    inputHash: row.input_hash,
+    lastError: row.last_error,
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+    updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
+  }));
+}
+
+async function briefingRowsForUser(client, userId, limit = 50) {
+  const result = await client.query(
+    `
+      select *
+      from briefs
+      where user_id = $1
+      order by created_at desc
+      limit $2
+    `,
+    [userId, limit],
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    accountId: row.source_connection_id || row.user_id,
+    scopeType: row.scope_type,
+    sourceConnectionId: row.source_connection_id,
+    text: row.text,
+    narrative: row.narrative || {},
+    callouts: row.callouts || [],
+    counts: row.counts || {},
+    memory: row.memory || {},
+    messageIds: row.input_message_ids || [],
+    generatedAt: row.created_at?.toISOString?.() || row.created_at,
+    createdAt: row.created_at?.toISOString?.() || row.created_at,
+    source: "ai-loop",
+    model: row.model,
+    prompt: {
+      id: row.prompt_id,
+      version: row.prompt_version,
+    },
+  }));
+}
+
+export async function readStoreFor(userId) {
+  if (!userId) throw new Error("readStoreFor requires a userId");
+  return withClient(async (client) => ({
+    schemaVersion: 2,
+    oauthStates: [],
+    users: [{ id: userId }],
+    accounts: await accountRowsForUser(client, userId),
+    messages: await messageRowsForUser(client, userId),
+    threads: await threadRowsForUser(client, userId),
+    classificationState: await classificationStateRowsForUser(client, userId),
+    feedback: await feedbackRowsForUser(client, userId),
+    events: [],
+    queueJobs: [],
+    aiRuns: await aiRunRowsForUser(client, userId),
+    inboxBriefings: await briefingRowsForUser(client, userId),
+    verificationRuns: await verificationRunRows(client),
+  }));
+}
+
+export async function listAiRunsFor(userId, limit = 50) {
+  if (!userId) throw new Error("listAiRunsFor requires a userId");
+  return withClient((client) => aiRunRowsForUser(client, userId, limit));
+}
+
+export async function clearUserData(userId) {
+  if (!userId) throw new Error("clearUserData requires a userId");
+  await withClient((client) => client.query("delete from users where id = $1", [userId]));
+}
+
 export async function readStore() {
   return withClient(async (client) => ({
     schemaVersion: 2,
@@ -612,6 +860,7 @@ export async function readStore() {
     accounts: await accountRows(client),
     messages: await messageRows(client),
     threads: await threadRows(client),
+    classificationState: await classificationStateRows(client),
     feedback: await feedbackRows(client),
     events: [],
     queueJobs: [],
@@ -621,18 +870,22 @@ export async function readStore() {
   }));
 }
 
-export async function saveOAuthState(state) {
+export async function saveOAuthState(state, userId) {
+  if (!userId) throw new Error("saveOAuthState requires a userId");
   const stateHash = hashSensitiveValue(state, { purpose: "oauth_state" });
-  await withClient((client) =>
-    client.query(
+  await withClient(async (client) => {
+    await ensureUser(client, userId, null);
+    await client.query(
       `
-        insert into oauth_states (state_hash, created_at)
-        values ($1, now())
-        on conflict (state_hash) do update set created_at = now()
+        insert into oauth_states (state_hash, user_id, created_at)
+        values ($1, $2, now())
+        on conflict (state_hash) do update
+          set user_id = excluded.user_id,
+              created_at = now()
       `,
-      [stateHash],
-    ),
-  );
+      [stateHash, userId],
+    );
+  });
 }
 
 export async function consumeOAuthState(state) {
@@ -640,10 +893,11 @@ export async function consumeOAuthState(state) {
   return withClient(async (client) => {
     await client.query("delete from oauth_states where created_at < now() - interval '10 minutes'");
     const result = await client.query(
-      "delete from oauth_states where state_hash = $1 returning state_hash",
+      "delete from oauth_states where state_hash = $1 returning user_id",
       [stateHash],
     );
-    return result.rowCount > 0;
+    if (!result.rowCount) return { ok: false, userId: null };
+    return { ok: true, userId: result.rows[0].user_id };
   });
 }
 
@@ -711,6 +965,79 @@ export async function recordAiRun(run) {
           briefing.generatedAt || run.createdAt || nowIso(),
         ],
       );
+    }
+
+    if (run.kind === "classification-batch") {
+      const classifiedAt = run.completedAt || run.createdAt || nowIso();
+      for (const decision of run.output?.decisions || []) {
+        const messageResult = await client.query(
+          "select user_id from messages where id = $1",
+          [decision.messageId],
+        );
+        if (!messageResult.rowCount) continue;
+
+        const messageUserId = messageResult.rows[0].user_id;
+        const classificationId = `classification_${crypto.randomUUID()}`;
+        await client.query(
+          `
+            insert into message_classifications (
+              id, message_id, user_id, system_category, needs_reply,
+              automated, possible_junk, direct, score, confidence, reasons,
+              action_metadata, model_provider, model, prompt_id, prompt_version,
+              input_hash, created_at
+            )
+            values (
+              $1, $2, $3, $4, $5,
+              $6, $7, $8, $9, $10, $11::jsonb,
+              $12::jsonb, $13, $14, $15, $16,
+              $17, $18
+            )
+          `,
+          [
+            classificationId,
+            decision.messageId,
+            messageUserId,
+            decision.category,
+            Boolean(decision.needsReply),
+            Boolean(decision.automated),
+            Boolean(decision.possibleJunk),
+            Boolean(decision.direct),
+            Number(decision.recsysScore || 0),
+            Number(decision.confidence || 0),
+            JSON.stringify(decision.reasons || []),
+            JSON.stringify(decision.extracted || {}),
+            run.provider?.name || null,
+            run.provider?.model || null,
+            run.promptRefs?.find((prompt) => prompt.id === "mail-message-classification")?.id || null,
+            run.promptRefs?.find((prompt) => prompt.id === "mail-message-classification")?.version || null,
+            decision.instrumentation?.inputHash || "",
+            classifiedAt,
+          ],
+        );
+        await client.query(
+          `
+            update message_classification_state
+               set state = 'classified',
+                   attempt_count = attempt_count + 1,
+                   last_classified_at = $2,
+                   current_classification_id = $3,
+                   classifier_version = $4,
+                   input_hash = $5,
+                   locked_at = null,
+                   locked_by = null,
+                   last_error = null,
+                   updated_at = now()
+             where message_id = $1
+          `,
+          [
+            decision.messageId,
+            classifiedAt,
+            classificationId,
+            run.provider?.classificationModel || run.provider?.model || "deterministic",
+            decision.instrumentation?.inputHash || "",
+          ],
+        );
+      }
     }
   });
   return run;

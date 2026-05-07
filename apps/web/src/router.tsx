@@ -41,14 +41,17 @@ import type {
   AccountSummary,
   AiRun,
   AiVerificationRun,
+  ClassificationBacklogSummary,
   FeedbackKind,
   InboxBriefing,
   MailMessage,
   MailProvider,
   PhoenixObservabilityStatus,
   StatusResponse,
+  SyntheticIngestionResponse,
 } from "@sanemail/shared/types";
 import {
+  classifyUnclassifiedMessages,
   disconnect,
   getAiControl,
   getHome,
@@ -56,10 +59,11 @@ import {
   getMessages,
   getStatus,
   getToday,
-  runAiLoop,
+  runDailyBrief,
   runAiVerification,
   resetDemoData,
   saveFeedback,
+  synthesizeIngestionBatch,
   syncGmail,
   syncMock,
 } from "./api";
@@ -614,12 +618,13 @@ const aiRunModeOptions: { id: AiRunMode; label: string; hint: string }[] = [
 function AiOpsRoute() {
   const [runMode, setRunMode] = useState<AiRunMode>("auto");
   const [runLimit, setRunLimit] = useState<number>(500);
+  const [classificationLimit, setClassificationLimit] = useState<number>(10);
   const query = useQuery({
     queryKey: queryKeys.aiControl,
     queryFn: getAiControl,
   });
   const runMutation = useMutation({
-    mutationFn: (options: { mode: AiRunMode; limit: number }) => runAiLoop(options),
+    mutationFn: (options: { mode: AiRunMode; limit: number }) => runDailyBrief(options),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.aiControl });
     },
@@ -630,11 +635,41 @@ function AiOpsRoute() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.aiControl });
     },
   });
+  const synthesizeMutation = useMutation({
+    mutationFn: synthesizeIngestionBatch,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.aiControl });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.status });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.home });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.messages });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.today });
+    },
+  });
+  const classifyMutation = useMutation({
+    mutationFn: () => classifyUnclassifiedMessages({ limit: classificationLimit }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.aiControl });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.status });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.home });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.messages });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.today });
+    },
+  });
 
   if (query.isError) return <ErrorPanel title="Could not load AI Ops" error={query.error} />;
   if (query.isLoading || !query.data) return <Loading label="Loading AI Ops" />;
 
   const latestRun = runMutation.data?.run || query.data.latestRun;
+  const latestClassificationRun =
+    classifyMutation.data?.run ||
+    query.data.ingestion?.latestClassificationRun ||
+    query.data.latestClassificationRun ||
+    null;
+  const classificationBacklog =
+    classifyMutation.data?.classificationBacklog.after ||
+    synthesizeMutation.data?.classificationBacklog ||
+    query.data.ingestion?.classificationBacklog ||
+    null;
   const latestVerification = verifyMutation.data?.run || query.data.latestVerification;
   const observability = query.data.observability ?? defaultObservability;
   const prompts = query.data.prompts ?? [];
@@ -644,6 +679,67 @@ function AiOpsRoute() {
       <section className="page-heading">
         <h1>AI Ops</h1>
         <p>Prompt control, run traces, and local evals for the curation loop.</p>
+      </section>
+      <section className="surface">
+        <div className="section-header">
+          <div>
+            <h2>Ingestion flow</h2>
+            <p>Fast local emulation for new mail, followed by explicit classification.</p>
+          </div>
+          <div className="toolbar">
+            <label className="ai-run-limit" title="Max unclassified messages to classify in this batch">
+              <span className="ai-run-limit-label">Batch</span>
+              <input
+                type="number"
+                min={1}
+                max={500}
+                step={1}
+                value={classificationLimit}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  if (Number.isFinite(next) && next > 0) {
+                    setClassificationLimit(Math.min(500, Math.floor(next)));
+                  }
+                }}
+                disabled={classifyMutation.isPending || synthesizeMutation.isPending}
+                data-testid="ai-classification-limit"
+              />
+            </label>
+            <button
+              className="button primary"
+              onClick={() => synthesizeMutation.mutate()}
+              disabled={synthesizeMutation.isPending || classifyMutation.isPending}
+              data-testid="ai-synthesize-ingestion"
+            >
+              {synthesizeMutation.isPending ? <Loader2 className="spin" size={17} /> : <Database size={17} />}
+              Synthesize batch
+            </button>
+            <button
+              className="button"
+              onClick={() => classifyMutation.mutate()}
+              disabled={classifyMutation.isPending || synthesizeMutation.isPending}
+              data-testid="ai-classify-unclassified"
+            >
+              {classifyMutation.isPending ? <Loader2 className="spin" size={17} /> : <MailCheck size={17} />}
+              Classify unclassified
+            </button>
+          </div>
+        </div>
+        {synthesizeMutation.isError ? (
+          <p className="ops-warn" data-testid="ai-synthesize-error">
+            Ingest failed: {synthesizeMutation.error instanceof Error ? synthesizeMutation.error.message : String(synthesizeMutation.error)}
+          </p>
+        ) : null}
+        {classifyMutation.isError ? (
+          <p className="ops-warn" data-testid="ai-classify-error">
+            Classification failed: {classifyMutation.error instanceof Error ? classifyMutation.error.message : String(classifyMutation.error)}
+          </p>
+        ) : null}
+        <div className="ops-grid">
+          <SyntheticBatchSummary response={synthesizeMutation.data || null} />
+          <BacklogSummary summary={classificationBacklog} />
+          <ClassificationRunSummary run={latestClassificationRun} />
+        </div>
       </section>
       <section className="surface">
         <div className="section-header">
@@ -889,6 +985,85 @@ function VerificationCases({ run }: { run: AiVerificationRun }) {
           </span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function formatMs(value?: number) {
+  if (!Number.isFinite(value)) return "0ms";
+  return `${Math.round(Number(value))}ms`;
+}
+
+function SyntheticBatchSummary({ response }: { response: SyntheticIngestionResponse | null }) {
+  if (!response) {
+    return (
+      <div className="ops-panel" data-testid="ai-ingestion-latest-batch">
+        <Database size={18} />
+        <strong>No batch yet</strong>
+        <span>Ready to synthesize local mail.</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="ops-panel" data-testid="ai-ingestion-latest-batch">
+      <Database size={18} />
+      <strong>{response.batch.count} messages</strong>
+      <span>{response.analytics.inserted} inserted · {response.analytics.updated} updated</span>
+      <span className="muted">
+        ingest {formatMs(response.analytics.ingestLatencyMs)} · synth {formatMs(response.analytics.synthesisLatencyMs)}
+      </span>
+      <span className="muted">classification skipped · brief skipped</span>
+    </div>
+  );
+}
+
+function BacklogSummary({ summary }: { summary: ClassificationBacklogSummary | null }) {
+  if (!summary) {
+    return (
+      <div className="ops-panel" data-testid="ai-classification-backlog">
+        <Activity size={18} />
+        <strong>Backlog unknown</strong>
+        <span>Load AI Ops to inspect state.</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="ops-panel" data-testid="ai-classification-backlog">
+      <Activity size={18} />
+      <strong>{summary.backlog} unclassified</strong>
+      <span>{summary.total} total · {summary.classified} classified</span>
+      <span className="muted">
+        {summary.pending} pending · {summary.stale} stale · {summary.failed} failed
+      </span>
+      {summary.newestPriorityAt ? <span className="muted">newest {formatDate(summary.newestPriorityAt)}</span> : null}
+    </div>
+  );
+}
+
+function ClassificationRunSummary({ run }: { run: AiRun | null }) {
+  if (!run) {
+    return (
+      <div className="ops-panel" data-testid="ai-classification-latest-run">
+        <MailCheck size={18} />
+        <strong>No classification run</strong>
+        <span>Run a batch after ingest.</span>
+      </div>
+    );
+  }
+
+  const categories = Object.entries(run.metrics.categoryCounts || {})
+    .map(([category, count]) => `${category}: ${count}`)
+    .join(" · ");
+
+  return (
+    <div className="ops-panel" data-testid="ai-classification-latest-run">
+      <MailCheck size={18} />
+      <strong>{run.metrics.messagesProcessed} processed</strong>
+      <span>{run.provider.name} · {run.provider.model}</span>
+      <span className="muted">{formatMs(run.metrics.latencyMs)} · {run.llmCalls?.length || 0} LLM calls</span>
+      {categories ? <span className="muted">{categories}</span> : null}
     </div>
   );
 }

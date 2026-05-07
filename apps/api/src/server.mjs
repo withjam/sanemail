@@ -5,19 +5,22 @@ import http from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadConfig, validateGoogleConfig, validateSecurityConfig } from "./config.mjs";
+import { AuthError, describeAuthMode, requireUser } from "./auth.mjs";
 import {
   buildGoogleAuthUrl,
   exchangeCodeForTokens,
   getProfile,
 } from "./gmail.mjs";
 import {
-  clearLocalData,
+  classificationBacklogSummaryFromStore,
+  clearUserData,
   consumeOAuthState,
-  getPrimaryAccount,
+  ensureUserRecord,
+  getPrimarySourceConnection,
   latestInboxBriefing,
-  listAiRuns,
+  listAiRunsFor,
   listVerificationRuns,
-  readStore,
+  readStoreFor,
   saveFeedback,
   saveOAuthState,
   upsertAccount,
@@ -26,10 +29,11 @@ import { getClassifiedMessages } from "./classifier.mjs";
 import { listQueueJobs } from "./queue.mjs";
 import { resetDemoData } from "./demo-data.mjs";
 import { syncSourceConnection } from "./source-sync.mjs";
+import { synthesizeIngestionBatch } from "./synthetic-ingestion.mjs";
 import { maybeEnqueuePostIngestClassification } from "./post-ingest-jobs.mjs";
 import { getPromptRecords } from "./ai/prompts.mjs";
 import { getAiEvalRecords } from "./ai/evals.mjs";
-import { buildInboxBriefing, runAiLoop } from "./ai/pipeline.mjs";
+import { buildInboxBriefing, runClassificationBatch, runDailyBrief } from "./ai/pipeline.mjs";
 import { runSyntheticVerification } from "./ai/verification.mjs";
 import { getPhoenixStatus } from "./ai/phoenix.mjs";
 
@@ -188,16 +192,31 @@ async function parseJsonBody(request) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-async function routeStatus(response) {
-  const store = await readStore();
+async function routeStatus(userId, response) {
+  if (!userId) {
+    sendJson(response, {
+      account: null,
+      authenticated: false,
+      configMissing: validateGoogleConfig(config),
+      securityMissing: validateSecurityConfig(config),
+      authMode: describeAuthMode(config),
+      counts: { messages: 0, today: 0, needsReply: 0, junkReview: 0 },
+      gmailReadonly: config.google.readonlyScope,
+    });
+    return;
+  }
+
+  const store = await readStoreFor(userId);
   const account = store.accounts[0] || null;
   const messages = getMessageList(store, account);
   const today = getTodayMessages(store, account);
 
   sendJson(response, {
     account: publicAccount(account),
+    authenticated: true,
     configMissing: validateGoogleConfig(config),
     securityMissing: validateSecurityConfig(config),
+    authMode: describeAuthMode(config),
     counts: {
       messages: messages.length,
       today: today.length,
@@ -208,25 +227,26 @@ async function routeStatus(response) {
   });
 }
 
-async function routeMessages(response) {
-  const store = await readStore();
+async function routeMessages(userId, response) {
+  const store = await readStoreFor(userId);
   const account = store.accounts[0] || null;
   sendJson(response, { messages: getMessageList(store, account) });
 }
 
-async function routeToday(response) {
-  const store = await readStore();
+async function routeToday(userId, response) {
+  const store = await readStoreFor(userId);
   const account = store.accounts[0] || null;
   sendJson(response, { messages: getTodayMessages(store, account) });
 }
 
-async function routeHome(response) {
-  const store = await readStore();
+async function routeHome(userId, response) {
+  const store = await readStoreFor(userId);
   const account = store.accounts[0] || null;
   const messages = getMessageList(store, account);
   const visibleMessages = messages.filter((message) => !message.sane.possibleJunk);
   const run = latestAiRun(store);
-  const storedBriefing = latestInboxBriefing(store, account?.id);
+  // Store is already user-scoped via readStoreFor(); no per-account filter needed.
+  const storedBriefing = latestInboxBriefing(store);
   const decisions = decisionMap(run);
   const tabs = buildHomeTabs(messages, decisions);
   const briefing =
@@ -271,8 +291,8 @@ async function routeHome(response) {
   });
 }
 
-async function routeMessage(messageId, response) {
-  const store = await readStore();
+async function routeMessage(userId, messageId, response) {
+  const store = await readStoreFor(userId);
   const account = store.accounts[0] || null;
   const message = getMessageList(store, account).find((item) => item.id === messageId);
   if (!message) {
@@ -282,11 +302,18 @@ async function routeMessage(messageId, response) {
   sendJson(response, { message });
 }
 
-async function routeFeedback(messageId, request, response) {
+async function routeFeedback(userId, messageId, request, response) {
   const body = await parseJsonBody(request);
   const kind = body.kind;
   if (!kind) {
     sendJson(response, { error: "missing_feedback_kind" }, 400);
+    return;
+  }
+  // Verify the message belongs to this user before recording feedback.
+  const store = await readStoreFor(userId);
+  const owns = (store.messages || []).some((message) => message.id === messageId);
+  if (!owns) {
+    sendJson(response, { error: "message_not_found" }, 404);
     return;
   }
 
@@ -294,9 +321,9 @@ async function routeFeedback(messageId, request, response) {
   sendJson(response, { ok: true });
 }
 
-async function regenerateBriefAfterSync(trigger) {
+async function regenerateBriefAfterSync(userId, trigger) {
   try {
-    const run = await runAiLoop({ trigger, mode: "cold_start" });
+    const run = await runDailyBrief({ userId, trigger, mode: "cold_start" });
     return { runId: run.id, briefingGenerated: Boolean(run.output?.briefing) };
   } catch (error) {
     console.error(`[sync] brief regeneration failed (${trigger}):`, error);
@@ -304,30 +331,35 @@ async function regenerateBriefAfterSync(trigger) {
   }
 }
 
-async function routeSyncGmail(response) {
-  const { account, result } = await syncSourceConnection({ provider: "gmail", trigger: "manual" });
+async function routeSyncGmail(userId, response) {
+  const { account, result } = await syncSourceConnection({
+    userId,
+    provider: "gmail",
+    trigger: "manual",
+  });
   const queued = await maybeEnqueuePostIngestClassification(account);
-  const briefRun = await regenerateBriefAfterSync("sync:gmail");
+  const briefRun = await regenerateBriefAfterSync(userId, "sync:gmail");
   sendJson(response, { ok: true, result, briefRun, ...(queued ? { queued } : {}) });
 }
 
-async function routeDisconnect(response) {
-  await clearLocalData();
+async function routeDisconnect(userId, response) {
+  await clearUserData(userId);
   sendJson(response, { ok: true });
 }
 
-async function routeDemoReset(response) {
-  const { account, result } = await resetDemoData();
+async function routeDemoReset(userId, response) {
+  const { account, result } = await resetDemoData({ userId });
   sendJson(response, { ok: true, account: publicAccount(account), result });
 }
 
-async function routeSyncMock(response) {
+async function routeSyncMock(userId, response) {
   const { account, result } = await syncSourceConnection({
+    userId,
     provider: "mock",
     trigger: "manual",
   });
   const queued = await maybeEnqueuePostIngestClassification(account);
-  const briefRun = await regenerateBriefAfterSync("sync:mock");
+  const briefRun = await regenerateBriefAfterSync(userId, "sync:mock");
   sendJson(response, {
     ok: true,
     account: publicAccount(account),
@@ -337,9 +369,12 @@ async function routeSyncMock(response) {
   });
 }
 
-async function routeAiControl(response) {
-  const runs = await listAiRuns(20);
+async function routeAiControl(userId, response) {
+  const store = await readStoreFor(userId);
+  const account = store.accounts[0] || null;
+  const runs = await listAiRunsFor(userId, 20);
   const briefingRuns = runs.filter((run) => run.kind === "daily-brief" || run.output?.briefing);
+  const classificationRuns = runs.filter((run) => run.kind === "classification-batch");
   const verificationRuns = await listVerificationRuns(20);
   const queueJobs = await listQueueJobs(20);
   sendJson(response, {
@@ -347,18 +382,73 @@ async function routeAiControl(response) {
     evals: getAiEvalRecords(),
     observability: getPhoenixStatus(),
     latestRun: briefingRuns[0] || runs[0] || null,
+    latestClassificationRun: classificationRuns[0] || null,
     runs,
     queueJobs,
+    ingestion: {
+      classificationBacklog: classificationBacklogSummaryFromStore(store, account?.id),
+      latestClassificationRun: classificationRuns[0] || null,
+    },
     latestVerification: verificationRuns[0] || null,
     verificationRuns,
   });
 }
 
-async function routeAiRun(request, response) {
+async function routeAiIngestionSynthesize(userId, request, response) {
+  const body = await parseJsonBody(request);
+  const started = Date.now();
+  const { account, result, batch, analytics } = await synthesizeIngestionBatch({
+    userId,
+    count: body.count,
+  });
+  const store = await readStoreFor(userId);
+  sendJson(response, {
+    ok: true,
+    account: publicAccount(account),
+    result,
+    batch,
+    analytics: {
+      ...analytics,
+      totalRouteLatencyMs: Date.now() - started,
+    },
+    classificationBacklog: classificationBacklogSummaryFromStore(store, account.id),
+  });
+}
+
+async function routeAiClassifyUnclassified(userId, request, response) {
+  const body = await parseJsonBody(request);
+  const limit = body.limit ? Number(body.limit) : config.queue.classificationBatchSize;
+  const beforeStore = await readStoreFor(userId);
+  const account = beforeStore.accounts[0] || null;
+  const before = classificationBacklogSummaryFromStore(beforeStore, account?.id);
+  const started = Date.now();
+  const run = await runClassificationBatch({
+    userId,
+    limit,
+    trigger: "api:classification-batch",
+  });
+  const afterStore = await readStoreFor(userId);
+  sendJson(response, {
+    ok: true,
+    run,
+    classificationBacklog: {
+      before,
+      after: classificationBacklogSummaryFromStore(afterStore, account?.id),
+    },
+    analytics: {
+      messagesProcessed: run.metrics?.messagesProcessed || 0,
+      latencyMs: Date.now() - started,
+      briefingGenerated: Boolean(run.output?.briefing),
+      llmCalls: run.llmCalls?.length || 0,
+    },
+  });
+}
+
+async function routeAiRun(userId, request, response) {
   const body = await parseJsonBody(request);
   const limit = body.limit ? Number(body.limit) : undefined;
   const mode = body.mode;
-  const run = await runAiLoop({ limit, mode, trigger: "api" });
+  const run = await runDailyBrief({ userId, limit, mode, trigger: "api" });
   sendJson(response, { ok: true, run });
 }
 
@@ -367,7 +457,7 @@ async function routeAiVerify(response) {
   sendJson(response, { ok: true, run });
 }
 
-async function routeConnectGmail(response) {
+async function routeConnectGmail(userId, response) {
   const missing = validateGoogleConfig(config);
   if (missing.length) {
     redirect(response, `${config.webOrigin}/settings?error=missing_google_config`);
@@ -375,7 +465,7 @@ async function routeConnectGmail(response) {
   }
 
   const state = crypto.randomUUID();
-  await saveOAuthState(state);
+  await saveOAuthState(state, userId);
   redirect(response, buildGoogleAuthUrl(config, state));
 }
 
@@ -388,23 +478,31 @@ async function routeOAuthCallback(url, response) {
     redirect(response, `${config.webOrigin}/settings?error=${encodeURIComponent(error)}`);
     return;
   }
-  if (!code || !state || !(await consumeOAuthState(state))) {
+  if (!code || !state) {
     redirect(response, `${config.webOrigin}/settings?error=invalid_oauth_callback`);
     return;
   }
+  const consumed = await consumeOAuthState(state);
+  if (!consumed?.ok || !consumed.userId) {
+    redirect(response, `${config.webOrigin}/settings?error=invalid_oauth_callback`);
+    return;
+  }
+  const userId = consumed.userId;
 
   const tokens = await exchangeCodeForTokens(config, code);
   const tempAccount = {
     id: "gmail:pending",
+    userId,
     provider: "gmail",
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token,
     tokenExpiresAt: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
   };
   const profile = await getProfile(tempAccount);
-  const existing = await getPrimaryAccount();
+  const existing = await getPrimarySourceConnection(userId);
   const account = await upsertAccount({
-    id: `gmail:${profile.emailAddress}`,
+    id: `gmail:${userId}:${profile.emailAddress}`,
+    userId,
     provider: "gmail",
     email: profile.emailAddress,
     messagesTotal: profile.messagesTotal,
@@ -456,35 +554,74 @@ async function serveStatic(url, response) {
   createReadStream(filePath).pipe(response);
 }
 
+function authenticateRequest(request, response) {
+  try {
+    return requireUser(request, { config });
+  } catch (error) {
+    if (error instanceof AuthError) {
+      sendJson(response, { error: error.code, message: error.message }, error.status);
+      return null;
+    }
+    throw error;
+  }
+}
+
 async function handleApi(url, request, response) {
   const messageMatch = url.pathname.match(/^\/api\/messages\/(.+?)(\/feedback)?$/);
 
-  if (request.method === "GET" && url.pathname === "/api/status") return routeStatus(response);
-  if (request.method === "GET" && url.pathname === "/api/home") return routeHome(response);
-  if (request.method === "GET" && url.pathname === "/api/messages") return routeMessages(response);
-  if (request.method === "GET" && url.pathname === "/api/today") return routeToday(response);
-  if (request.method === "POST" && url.pathname === "/api/sync/gmail") return routeSyncGmail(response);
-  if (request.method === "POST" && url.pathname === "/api/sync/mock") return routeSyncMock(response);
-  if (request.method === "POST" && url.pathname === "/api/disconnect") return routeDisconnect(response);
-  if (request.method === "POST" && url.pathname === "/api/demo/reset") return routeDemoReset(response);
-  if (request.method === "GET" && url.pathname === "/api/ai/control") return routeAiControl(response);
+  // /api/status is allowed without auth so the web app can probe configuration
+  // before sign-in. With a token it also returns the user's snapshot.
+  if (request.method === "GET" && url.pathname === "/api/status") {
+    let userId = null;
+    try {
+      const principal = requireUser(request, { config });
+      await ensureUserRecord(principal.userId, principal.email);
+      userId = principal.userId;
+    } catch (error) {
+      if (!(error instanceof AuthError)) throw error;
+    }
+    return routeStatus(userId, response);
+  }
+
+  // Every other route requires authentication.
+  const principal = authenticateRequest(request, response);
+  if (!principal) return;
+  await ensureUserRecord(principal.userId, principal.email);
+  const { userId } = principal;
+
+  if (request.method === "GET" && url.pathname === "/api/home") return routeHome(userId, response);
+  if (request.method === "GET" && url.pathname === "/api/messages") return routeMessages(userId, response);
+  if (request.method === "GET" && url.pathname === "/api/today") return routeToday(userId, response);
+  if (request.method === "POST" && url.pathname === "/api/sync/gmail") return routeSyncGmail(userId, response);
+  if (request.method === "POST" && url.pathname === "/api/sync/mock") return routeSyncMock(userId, response);
+  if (request.method === "POST" && url.pathname === "/api/disconnect") return routeDisconnect(userId, response);
+  if (request.method === "POST" && url.pathname === "/api/demo/reset") return routeDemoReset(userId, response);
+  if (request.method === "GET" && url.pathname === "/api/ai/control") return routeAiControl(userId, response);
   if (request.method === "GET" && url.pathname === "/api/queue/jobs") {
     return sendJson(response, { jobs: await listQueueJobs(50) });
   }
   if (request.method === "GET" && url.pathname === "/api/ai/runs") {
-    return sendJson(response, { runs: await listAiRuns(50) });
+    return sendJson(response, { runs: await listAiRunsFor(userId, 50) });
   }
   if (request.method === "GET" && url.pathname === "/api/ai/verification") {
     return sendJson(response, { runs: await listVerificationRuns(50) });
   }
-  if (request.method === "POST" && url.pathname === "/api/ai/run") return routeAiRun(request, response);
+  if (request.method === "POST" && url.pathname === "/api/ai/run") return routeAiRun(userId, request, response);
   if (request.method === "POST" && url.pathname === "/api/ai/verify") return routeAiVerify(response);
-  if (request.method === "GET" && url.pathname === "/api/connect/gmail") return routeConnectGmail(response);
+  if (request.method === "POST" && url.pathname === "/api/ai/ingestion/synthesize") {
+    return routeAiIngestionSynthesize(userId, request, response);
+  }
+  if (request.method === "POST" && url.pathname === "/api/ai/ingestion/classify") {
+    return routeAiClassifyUnclassified(userId, request, response);
+  }
+  if (request.method === "GET" && url.pathname === "/api/connect/gmail") return routeConnectGmail(userId, response);
 
   if (messageMatch) {
     const messageId = decodeURIComponent(messageMatch[1]);
-    if (request.method === "GET" && !messageMatch[2]) return routeMessage(messageId, response);
-    if (request.method === "POST" && messageMatch[2]) return routeFeedback(messageId, request, response);
+    if (request.method === "GET" && !messageMatch[2]) return routeMessage(userId, messageId, response);
+    if (request.method === "POST" && messageMatch[2]) {
+      return routeFeedback(userId, messageId, request, response);
+    }
   }
 
   sendJson(response, { error: "not_found" }, 404);
@@ -494,7 +631,12 @@ async function handleRequest(request, response) {
   const url = new URL(request.url, config.appOrigin);
 
   try {
-    if (url.pathname === "/connect/gmail") return routeConnectGmail(response);
+    if (url.pathname === "/connect/gmail") {
+      const principal = authenticateRequest(request, response);
+      if (!principal) return;
+      await ensureUserRecord(principal.userId, principal.email);
+      return routeConnectGmail(principal.userId, response);
+    }
     if (url.pathname === "/oauth/google/callback") return routeOAuthCallback(url, response);
     if (url.pathname.startsWith("/api/")) return handleApi(url, request, response);
 

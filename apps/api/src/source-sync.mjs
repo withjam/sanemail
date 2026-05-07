@@ -1,7 +1,12 @@
 import { loadConfig } from "./config.mjs";
 import { syncMockSource } from "./demo-data.mjs";
 import { refreshAccessToken, syncRecentMessages } from "./gmail.mjs";
-import { getPrimaryAccount, readStore, upsertAccount, upsertSyncedMessages } from "./store.mjs";
+import {
+  getPrimarySourceConnection,
+  readStoreFor,
+  upsertAccount,
+  upsertSyncedMessages,
+} from "./store.mjs";
 
 function accountNeedsRefresh(account) {
   if (!account?.accessToken) return true;
@@ -9,11 +14,12 @@ function accountNeedsRefresh(account) {
   return new Date(account.tokenExpiresAt).getTime() - Date.now() < 60_000;
 }
 
-async function findAccount({ sourceConnectionId, accountId, provider } = {}) {
+async function findAccount({ userId, sourceConnectionId, accountId, provider } = {}) {
+  if (!userId) throw new Error("findAccount requires a userId");
   const id = sourceConnectionId || accountId;
-  if (!id && !provider) return getPrimaryAccount();
+  if (!id && !provider) return getPrimarySourceConnection(userId);
 
-  const store = await readStore();
+  const store = await readStoreFor(userId);
   const accounts = store.accounts || [];
   return accounts.find((account) => {
     if (id && account.id === id) return true;
@@ -27,21 +33,23 @@ async function freshGmailAccount(config, account) {
   if (!accountNeedsRefresh(account)) return account;
 
   const refreshed = await refreshAccessToken(config, account);
-  return upsertAccount(refreshed);
+  return upsertAccount({ ...refreshed, userId: account.userId });
 }
 
 export async function syncSourceConnection({
+  userId,
   sourceConnectionId,
   accountId,
   provider,
   trigger = "manual",
 } = {}) {
+  if (!userId) throw new Error("syncSourceConnection requires a userId");
   const config = loadConfig();
-  const account = await findAccount({ sourceConnectionId, accountId, provider });
+  const account = await findAccount({ userId, sourceConnectionId, accountId, provider });
   const sourceProvider = provider || account?.provider;
 
   if (sourceProvider === "mock" || sourceConnectionId?.startsWith("mock:")) {
-    const { account: mockAccount, result } = await syncMockSource();
+    const { account: mockAccount, result } = await syncMockSource({ userId });
     return {
       account: mockAccount,
       result,
