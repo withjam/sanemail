@@ -250,9 +250,10 @@ function SidebarSourcesSummary({ status }: { status?: StatusResponse }) {
   }
   const sources = resolveSources(status);
   const connectedSources = sources.filter((source) => source.connected);
+  const sourceLabel = connectedSources.length === 1 ? "source" : "sources";
   return (
     <div className="account-line" data-testid="sidebar-sources">
-      <strong>{connectedSources.length} of {sources.length} sources</strong>
+      <strong>{connectedSources.length} {sourceLabel} connected</strong>
       <ul className="sidebar-source-list">
         {connectedSources.map((source) => (
           <li key={source.entry.key} className="sidebar-source-row">
@@ -1248,11 +1249,15 @@ function SettingsRoute() {
         <div className="section-header padded-header">
           <div>
             <h2>Sources</h2>
-            <p>{connectedSources.length} of {sources.length} sources connected.</p>
+            <p>
+              {connectedSources.length === 1
+                ? "1 source connected."
+                : `${connectedSources.length} sources connected.`}
+            </p>
           </div>
         </div>
         <div className="source-list">
-          {sources.map((source) => (
+          {connectedSources.map((source) => (
             <SourceConnectionCard
               key={source.entry.key}
               source={source}
