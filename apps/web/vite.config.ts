@@ -9,8 +9,8 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["pwa-icon.svg"],
       manifest: {
-        name: "SaneMail",
-        short_name: "SaneMail",
+        name: "Togo Mail",
+        short_name: "Togo Mail",
         description: "A calmer personal email surface.",
         theme_color: "#f8fafc",
         background_color: "#f8fafc",

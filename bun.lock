@@ -17,11 +17,11 @@
       },
     },
     "apps/api": {
-      "name": "@sanemail/api",
+      "name": "@togomail/api",
       "version": "0.1.0",
     },
     "apps/web": {
-      "name": "@sanemail/web",
+      "name": "@togomail/web",
       "version": "0.1.0",
       "dependencies": {
         "@sanemail/shared": "workspace:*",
@@ -30,6 +30,7 @@
         "@tanstack/react-query": "^5.90.7",
         "@tanstack/react-query-persist-client": "^5.90.7",
         "@tanstack/react-router": "^1.132.0",
+        "@togomail/shared": "workspace:*",
         "lucide-react": "^0.552.0",
         "react": "^19.2.0",
         "react-dom": "^19.2.0",
@@ -45,7 +46,7 @@
       },
     },
     "packages/shared": {
-      "name": "@sanemail/shared",
+      "name": "@togomail/shared",
       "version": "0.1.0",
     },
   },
@@ -428,6 +429,7 @@
 
     "@rollup/rollup-win32-x64-msvc": ["@rollup/rollup-win32-x64-msvc@4.60.2", "", { "os": "win32", "cpu": "x64" }, "sha512-Nd/SgG27WoA9e+/TdK74KnHz852TLa94ovOYySo/yMPuTmpckK/jIF2jSwS3g7ELSKXK13/cVdmg1Z/DaCWKxA=="],
 
+<<<<<<< HEAD
     "@sanemail/api": ["@sanemail/api@workspace:apps/api"],
 
     "@sanemail/shared": ["@sanemail/shared@workspace:packages/shared"],
@@ -448,6 +450,8 @@
 
     "@supabase/supabase-js": ["@supabase/supabase-js@2.105.3", "", { "dependencies": { "@supabase/auth-js": "2.105.3", "@supabase/functions-js": "2.105.3", "@supabase/postgrest-js": "2.105.3", "@supabase/realtime-js": "2.105.3", "@supabase/storage-js": "2.105.3" } }, "sha512-5Dm9+I61LAWwjw+0zcqXhSmTxUJaYHBPyHwMCIBH4TBUNwDn2pYUIsi6oUu0I5r9HtLtaFl7w4wa+DV9gRsbDg=="],
 
+=======
+>>>>>>> claude-name-change
     "@surma/rollup-plugin-off-main-thread": ["@surma/rollup-plugin-off-main-thread@2.2.3", "", { "dependencies": { "ejs": "^3.1.6", "json5": "^2.2.0", "magic-string": "^0.25.0", "string.prototype.matchall": "^4.0.6" } }, "sha512-lR8q/9W7hZpMWweNiAKU7NQerBnzQQLvi8qnTDU/fxItPhtZVMbPV3lbCwjhIlNBe9Bbr5V+KHshvWmVSG9cxQ=="],
 
     "@tanstack/history": ["@tanstack/history@1.161.6", "", {}, "sha512-NaOGLRrddszbQj9upGat6HG/4TKvXLvu+osAIgfxPYA+eIvYKv8GKDJOrY2D3/U9MRnKfMWD7bU4jeD4xmqyIg=="],
@@ -469,6 +473,12 @@
     "@tanstack/router-core": ["@tanstack/router-core@1.169.1", "", { "dependencies": { "@tanstack/history": "1.161.6", "cookie-es": "^3.0.0", "seroval": "^1.5.0", "seroval-plugins": "^1.5.0" }, "bin": { "intent": "bin/intent.js" } }, "sha512-x+2gIGKTTE1qAn7tLieGfrB5ciOviDmmi2ox9fAWUubRV+yTU5ruGFXocoCIWF+lB+SOtnHjo2E9BLSWyYoEmA=="],
 
     "@tanstack/store": ["@tanstack/store@0.9.3", "", {}, "sha512-8reSzl/qGWGGVKhBoxXPMWzATSbZLZFWhwBAFO9NAyp0TxzfBP0mIrGb8CP8KrQTmvzXlR/vFPPUrHTLBGyFyw=="],
+
+    "@togomail/api": ["@togomail/api@workspace:apps/api"],
+
+    "@togomail/shared": ["@togomail/shared@workspace:packages/shared"],
+
+    "@togomail/web": ["@togomail/web@workspace:apps/web"],
 
     "@types/babel__core": ["@types/babel__core@7.20.5", "", { "dependencies": { "@babel/parser": "^7.20.7", "@babel/types": "^7.20.7", "@types/babel__generator": "*", "@types/babel__template": "*", "@types/babel__traverse": "*" } }, "sha512-qoQprZvz5wQFJwMDqeseRXWv3rqMvhgpbXFfVyWhbx9X47POIA6i/+dXefEmZKoAgOaTdaIgNSMqMIU61yRyzA=="],
 

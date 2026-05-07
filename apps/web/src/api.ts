@@ -11,7 +11,7 @@ import type {
   StatusResponse,
   SyncResponse,
   SyntheticIngestionResponse,
-} from "@sanemail/shared/types";
+} from "@togomail/shared/types";
 import { getCurrentAccessToken } from "./auth";
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -64,10 +64,13 @@ export function getMessage(id: string) {
 }
 
 export function saveFeedback(id: string, kind: FeedbackKind) {
-  return apiFetch<{ ok: true }>(`/api/messages/${encodeURIComponent(id)}/feedback`, {
-    method: "POST",
-    body: JSON.stringify({ kind }),
-  });
+  return apiFetch<{ ok: true }>(
+    `/api/messages/${encodeURIComponent(id)}/feedback`,
+    {
+      method: "POST",
+      body: JSON.stringify({ kind }),
+    },
+  );
 }
 
 export function syncGmail() {
@@ -112,7 +115,8 @@ export interface RunAiLoopOptions {
 export function runDailyBrief({ mode = "auto", limit }: RunAiLoopOptions = {}) {
   const body: { mode?: AiRunMode; limit?: number } = {};
   if (mode !== "auto") body.mode = mode;
-  if (typeof limit === "number" && Number.isFinite(limit) && limit > 0) body.limit = limit;
+  if (typeof limit === "number" && Number.isFinite(limit) && limit > 0)
+    body.limit = limit;
   return apiFetch<AiRunResponse>("/api/ai/run", {
     method: "POST",
     body: JSON.stringify(body),
@@ -126,9 +130,12 @@ export function synthesizeIngestionBatch() {
   });
 }
 
-export function classifyUnclassifiedMessages({ limit }: { limit?: number } = {}) {
+export function classifyUnclassifiedMessages({
+  limit,
+}: { limit?: number } = {}) {
   const body: { limit?: number } = {};
-  if (typeof limit === "number" && Number.isFinite(limit) && limit > 0) body.limit = limit;
+  if (typeof limit === "number" && Number.isFinite(limit) && limit > 0)
+    body.limit = limit;
   return apiFetch<AiClassificationRunResponse>("/api/ai/ingestion/classify", {
     method: "POST",
     body: JSON.stringify(body),
