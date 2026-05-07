@@ -128,7 +128,12 @@ const draftBuilders = [
 async function accountForSyntheticIngestion(userId) {
   if (!userId) throw new Error("accountForSyntheticIngestion requires a userId");
   const existing = await getPrimarySourceConnection(userId);
-  if (existing?.id && existing?.email) return existing;
+  // Never synthesize messages into a real connected mailbox. Synthetic ingestion
+  // must use a dedicated mock source connection so users can evaluate Gmail-only
+  // behavior without synthetic contamination.
+  if (existing?.provider === "mock" && existing?.demo && existing?.id && existing?.email) {
+    return existing;
+  }
   return upsertAccount(syntheticAccountFor(userId));
 }
 

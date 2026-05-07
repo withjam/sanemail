@@ -228,6 +228,7 @@ export type StatusResponse = {
   account: AccountSummary | null;
   configMissing: string[];
   securityMissing?: string[];
+  connectedProviders?: MailProvider[];
   counts: {
     messages: number;
     today: number;

@@ -102,6 +102,13 @@ export function resetDemoData() {
   });
 }
 
+export function clearDemoData() {
+  return apiFetch<{ ok: true }>("/api/demo/clear", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 export function getAiControl() {
   return apiFetch<AiControlResponse>("/api/ai/control");
 }

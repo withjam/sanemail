@@ -27,6 +27,7 @@ import {
 import {
   classificationBacklogSummaryFromStore,
   clearUserData,
+  clearDemoData,
   consumeOAuthState,
   ensureUserRecord,
   getPrimarySourceConnection,
@@ -85,6 +86,12 @@ function sendText(response, text, status = 200, contentType = "text/plain; chars
 function redirect(response, location) {
   response.writeHead(302, { Location: location });
   response.end();
+}
+
+function pickPrimaryAccount(store) {
+  const accounts = store?.accounts || [];
+  const real = accounts.find((account) => account && account.provider !== "mock" && !account.demo);
+  return real || accounts[0] || null;
 }
 
 function getMessageList(store, account) {
@@ -211,6 +218,7 @@ async function routeStatus(userId, response) {
       configMissing: validateGoogleConfig(config),
       securityMissing: validateSecurityConfig(config),
       authMode: describeAuthMode(config),
+      connectedProviders: [],
       counts: { messages: 0, today: 0, needsReply: 0, junkReview: 0 },
       gmailReadonly: config.google.readonlyScope,
     });
@@ -218,9 +226,10 @@ async function routeStatus(userId, response) {
   }
 
   const store = await readStoreFor(userId);
-  const account = store.accounts[0] || null;
+  const account = pickPrimaryAccount(store);
   const messages = getMessageList(store, account);
   const today = getTodayMessages(store, account);
+  const connectedProviders = [...new Set((store.accounts || []).map((a) => a?.provider).filter(Boolean))];
 
   sendJson(response, {
     account: publicAccount(account),
@@ -228,6 +237,7 @@ async function routeStatus(userId, response) {
     configMissing: validateGoogleConfig(config),
     securityMissing: validateSecurityConfig(config),
     authMode: describeAuthMode(config),
+    connectedProviders,
     counts: {
       messages: messages.length,
       today: today.length,
@@ -240,19 +250,19 @@ async function routeStatus(userId, response) {
 
 async function routeMessages(userId, response) {
   const store = await readStoreFor(userId);
-  const account = store.accounts[0] || null;
+  const account = pickPrimaryAccount(store);
   sendJson(response, { messages: getMessageList(store, account) });
 }
 
 async function routeToday(userId, response) {
   const store = await readStoreFor(userId);
-  const account = store.accounts[0] || null;
+  const account = pickPrimaryAccount(store);
   sendJson(response, { messages: getTodayMessages(store, account) });
 }
 
 async function routeHome(userId, response) {
   const store = await readStoreFor(userId);
-  const account = store.accounts[0] || null;
+  const account = pickPrimaryAccount(store);
   const messages = getMessageList(store, account);
   const visibleMessages = messages.filter((message) => !message.sane.possibleJunk);
   const run = latestAiRun(store);
@@ -304,7 +314,7 @@ async function routeHome(userId, response) {
 
 async function routeMessage(userId, messageId, response) {
   const store = await readStoreFor(userId);
-  const account = store.accounts[0] || null;
+  const account = pickPrimaryAccount(store);
   const message = getMessageList(store, account).find((item) => item.id === messageId);
   if (!message) {
     sendJson(response, { error: "message_not_found" }, 404);
@@ -361,6 +371,11 @@ async function routeDisconnect(userId, response) {
 async function routeDemoReset(userId, response) {
   const { account, result } = await resetDemoData({ userId });
   sendJson(response, { ok: true, account: publicAccount(account), result });
+}
+
+async function routeDemoClear(userId, response) {
+  const result = await clearDemoData(userId);
+  sendJson(response, { ok: true, result });
 }
 
 async function routeSyncMock(userId, response) {
@@ -641,6 +656,7 @@ async function handleApi(url, request, response) {
   if (request.method === "POST" && url.pathname === "/api/sync/mock") return routeSyncMock(userId, response);
   if (request.method === "POST" && url.pathname === "/api/disconnect") return routeDisconnect(userId, response);
   if (request.method === "POST" && url.pathname === "/api/demo/reset") return routeDemoReset(userId, response);
+  if (request.method === "POST" && url.pathname === "/api/demo/clear") return routeDemoClear(userId, response);
   if (request.method === "GET" && url.pathname === "/api/ai/control") return routeAiControl(userId, response);
   if (request.method === "GET" && url.pathname === "/api/queue/jobs") {
     return sendJson(response, { jobs: await listQueueJobs(50) });

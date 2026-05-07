@@ -235,7 +235,8 @@ export async function getPrimarySourceConnection(userId) {
   if (usePostgresStore()) return (await postgresStore()).getPrimarySourceConnection(userId);
   const store = await readStore();
   const accounts = (store.accounts || []).filter((account) => accountBelongsToUser(account, userId));
-  return accounts[0] || null;
+  const real = accounts.find((account) => account && account.provider !== "mock" && !account.demo);
+  return real || accounts[0] || null;
 }
 
 export async function writeStore(store) {
@@ -694,5 +695,45 @@ export async function clearUserData(userId) {
     );
     store.queueJobs = (store.queueJobs || []).filter((job) => job.userId !== userId);
     store.users = (store.users || []).filter((user) => user.id !== userId);
+  });
+}
+
+export async function clearDemoData(userId) {
+  if (!userId) throw new Error("clearDemoData requires a userId");
+  if (usePostgresStore()) return (await postgresStore()).clearDemoData(userId);
+
+  return mutateStore((store) => {
+    const demoAccountIds = new Set(
+      (store.accounts || [])
+        .filter((account) => accountBelongsToUser(account, userId))
+        .filter((account) => account.provider === "mock" || account.demo)
+        .map((account) => account.id),
+    );
+
+    if (!demoAccountIds.size) return { ok: true, removedAccounts: 0, removedMessages: 0 };
+
+    const beforeAccounts = store.accounts?.length || 0;
+    const beforeMessages = store.messages?.length || 0;
+    store.accounts = (store.accounts || []).filter((account) => !demoAccountIds.has(account.id));
+    store.messages = (store.messages || []).filter((message) => !demoAccountIds.has(message.accountId));
+    store.threads = (store.threads || []).filter((thread) => !demoAccountIds.has(thread.accountId));
+    store.classificationState = (store.classificationState || []).filter(
+      (row) => !demoAccountIds.has(row.accountId),
+    );
+    store.feedback = (store.feedback || []).filter(
+      (row) => !demoAccountIds.has(row.accountId),
+    );
+    store.aiRuns = (store.aiRuns || []).filter(
+      (run) => !run.input?.accountId || !demoAccountIds.has(run.input.accountId),
+    );
+    store.inboxBriefings = (store.inboxBriefings || []).filter(
+      (briefing) => !briefing.accountId || !demoAccountIds.has(briefing.accountId),
+    );
+
+    return {
+      ok: true,
+      removedAccounts: Math.max(0, beforeAccounts - (store.accounts?.length || 0)),
+      removedMessages: Math.max(0, beforeMessages - (store.messages?.length || 0)),
+    };
   });
 }

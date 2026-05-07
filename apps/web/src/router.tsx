@@ -55,6 +55,7 @@ import type {
 import {
   AI_OPS_RECENT_CLASSIFICATIONS_LIMIT,
   classifyUnclassifiedMessages,
+  clearDemoData,
   disconnect,
   getAiControl,
   getHome,
@@ -683,6 +684,7 @@ function AiOpsRoute() {
   const [runMode, setRunMode] = useState<AiRunMode>("auto");
   const [runLimit, setRunLimit] = useState<number>(500);
   const [classificationLimit, setClassificationLimit] = useState<number>(10);
+  const status = useStatus();
   const query = useQuery({
     queryKey: queryKeys.aiControl,
     queryFn: getAiControl,
@@ -742,6 +744,7 @@ function AiOpsRoute() {
   const latestVerification = verifyMutation.data?.run || query.data.latestVerification;
   const observability = query.data.observability ?? defaultObservability;
   const prompts = query.data.prompts ?? [];
+  const syntheticConnected = Boolean(status.data?.connectedProviders?.includes("mock"));
 
   return (
     <div className="page-grid">
@@ -777,8 +780,17 @@ function AiOpsRoute() {
             <button
               className="button primary"
               onClick={() => synthesizeMutation.mutate()}
-              disabled={synthesizeMutation.isPending || classifyMutation.isPending}
+              disabled={
+                !syntheticConnected ||
+                synthesizeMutation.isPending ||
+                classifyMutation.isPending
+              }
               data-testid="ai-synthesize-ingestion"
+              title={
+                syntheticConnected
+                  ? "Generate a small synthetic batch for testing."
+                  : "Synthetic source is not connected."
+              }
             >
               {synthesizeMutation.isPending ? <Loader2 className="spin" size={17} /> : <Database size={17} />}
               Synthesize batch
@@ -1313,9 +1325,9 @@ function resolveSources(status: StatusResponse): ResolvedSource[] {
     if (entry.key === "synthetic-local-dev") {
       return {
         entry,
-        connected: true,
+        connected: accountIsDemo,
         account: accountIsDemo ? account : null,
-        email: account && accountIsDemo ? account.email : "demo@example.com",
+        email: account && accountIsDemo ? account.email : "",
       };
     }
     const matched = account && !accountIsDemo && account.provider === entry.provider ? account : null;
@@ -1346,6 +1358,10 @@ function SettingsRoute() {
     mutationFn: resetDemoData,
     onSuccess: () => void queryClient.invalidateQueries(),
   });
+  const demoClearMutation = useMutation({
+    mutationFn: clearDemoData,
+    onSuccess: () => void queryClient.invalidateQueries(),
+  });
   const params = new URLSearchParams(window.location.search);
   const oauthError = params.get("error");
   const connectedQuery = params.get("connected");
@@ -1357,6 +1373,7 @@ function SettingsRoute() {
   const connectedSources = sources.filter((source) => source.connected);
   const availableSources = sources.filter((source) => !source.connected && source.entry.realConnection);
   const configMissing = [...statusData.configMissing, ...(statusData.securityMissing || [])];
+  const hasGmail = sources.some((source) => source.entry.key === "gmail" && source.connected);
 
   return (
     <div className="page-grid">
@@ -1405,10 +1422,13 @@ function SettingsRoute() {
               syncMockPending={syncMockMutation.isPending}
               disconnectPending={disconnectMutation.isPending}
               demoResetPending={demoResetMutation.isPending}
+              demoClearPending={demoClearMutation.isPending}
+              hasGmail={hasGmail}
               onSyncGmail={() => syncGmailMutation.mutate()}
               onSyncMock={() => syncMockMutation.mutate()}
               onDisconnect={() => disconnectMutation.mutate()}
               onResetDemo={() => demoResetMutation.mutate()}
+              onClearDemo={() => demoClearMutation.mutate()}
             />
           ))}
         </div>
@@ -1478,6 +1498,18 @@ function SettingsRoute() {
           <p className="muted">Clear every cached message and disconnect every source.</p>
         </div>
         <div className="settings-actions">
+          {hasGmail && (
+            <button
+              className="button danger-button"
+              onClick={() => demoClearMutation.mutate()}
+              disabled={demoClearMutation.isPending}
+              data-testid="settings-clear-demo-danger"
+              title="Remove the synthetic demo mailbox so you can evaluate Gmail-only."
+            >
+              {demoClearMutation.isPending ? <Loader2 className="spin" size={17} /> : <Trash2 size={17} />}
+              Delete demo mailbox
+            </button>
+          )}
           <button
             className="button danger-button"
             onClick={() => disconnectMutation.mutate()}
@@ -1500,10 +1532,13 @@ function SourceConnectionCard({
   syncMockPending,
   disconnectPending,
   demoResetPending,
+  demoClearPending,
+  hasGmail,
   onSyncGmail,
   onSyncMock,
   onDisconnect,
   onResetDemo,
+  onClearDemo,
 }: {
   source: ResolvedSource;
   gmailReadonly: string;
@@ -1512,10 +1547,13 @@ function SourceConnectionCard({
   syncMockPending: boolean;
   disconnectPending: boolean;
   demoResetPending: boolean;
+  demoClearPending: boolean;
+  hasGmail: boolean;
   onSyncGmail: () => void;
   onSyncMock: () => void;
   onDisconnect: () => void;
   onResetDemo: () => void;
+  onClearDemo: () => void;
 }) {
   const Icon = source.entry.icon;
   const isDev = source.entry.key === "synthetic-local-dev";
@@ -1556,24 +1594,39 @@ function SourceConnectionCard({
       <div className="source-card-actions">
         {isDev && (
           <>
-            <button
-              className="button"
-              onClick={onSyncMock}
-              disabled={syncMockPending}
-              data-testid="source-sync-dev"
-            >
-              {syncMockPending ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
-              Sync
-            </button>
-            <button
-              className="button"
-              onClick={onResetDemo}
-              disabled={demoResetPending}
-              data-testid="settings-reset-demo"
-            >
-              {demoResetPending ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
-              Reset demo data
-            </button>
+            {hasGmail ? (
+              <button
+                className="button danger-button"
+                onClick={onClearDemo}
+                disabled={demoClearPending}
+                data-testid="settings-clear-demo"
+                title="Remove the synthetic demo mailbox so you can evaluate real Gmail only."
+              >
+                {demoClearPending ? <Loader2 className="spin" size={16} /> : <Trash2 size={16} />}
+                Delete demo mailbox
+              </button>
+            ) : (
+              <>
+                <button
+                  className="button"
+                  onClick={onSyncMock}
+                  disabled={syncMockPending}
+                  data-testid="source-sync-dev"
+                >
+                  {syncMockPending ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+                  Sync
+                </button>
+                <button
+                  className="button"
+                  onClick={onResetDemo}
+                  disabled={demoResetPending}
+                  data-testid="settings-reset-demo"
+                >
+                  {demoResetPending ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+                  Reset demo data
+                </button>
+              </>
+            )}
           </>
         )}
         {isGmail && source.connected && (

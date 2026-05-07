@@ -263,7 +263,10 @@ export async function getPrimarySourceConnection(userId) {
         where sc.deleted_at is null
           and sc.status <> 'deleted'
           and sc.user_id = $1
-        order by sc.created_at asc
+        order by
+          (case when sc.provider = 'mock' then 1 else 0 end) asc,
+          coalesce((sc.metadata->>'demo')::boolean, false) asc,
+          sc.created_at asc
         limit 1
       `,
       [userId],
@@ -947,6 +950,57 @@ export async function listAiRunsFor(userId, limit = 50) {
 export async function clearUserData(userId) {
   if (!userId) throw new Error("clearUserData requires a userId");
   await withClient((client) => client.query("delete from users where id = $1", [userId]));
+}
+
+export async function clearDemoData(userId) {
+  if (!userId) throw new Error("clearDemoData requires a userId");
+  return withTransaction(async (client) => {
+    const sources = await client.query(
+      `
+        select id
+          from source_connections
+         where user_id = $1
+           and deleted_at is null
+           and status <> 'deleted'
+           and (provider = 'mock' or coalesce((metadata->>'demo')::boolean, false) = true)
+      `,
+      [userId],
+    );
+    const ids = sources.rows.map((row) => row.id).filter(Boolean);
+    if (!ids.length) return { ok: true, removedSources: 0, removedMessages: 0 };
+
+    const messageCount = await client.query(
+      "select count(1)::int as count from messages where user_id = $1 and primary_source_connection_id = any($2::text[])",
+      [userId, ids],
+    );
+
+    await client.query(
+      "delete from messages where user_id = $1 and primary_source_connection_id = any($2::text[])",
+      [userId, ids],
+    );
+    await client.query("delete from source_connections where id = any($1::text[])", [ids]);
+
+    // Clean up orphan threads after deleting messages.
+    await client.query(
+      `
+        delete from threads t
+         where t.user_id = $1
+           and not exists (
+             select 1 from messages m
+              where m.user_id = t.user_id
+                and m.canonical_thread_id = t.id
+                and m.deleted_at is null
+           )
+      `,
+      [userId],
+    );
+
+    return {
+      ok: true,
+      removedSources: ids.length,
+      removedMessages: Number(messageCount.rows?.[0]?.count || 0),
+    };
+  });
 }
 
 export async function readStore() {
