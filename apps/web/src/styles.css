@@ -355,7 +355,7 @@ textarea {
 }
 
 .briefing-content {
-  max-width: 840px;
+  max-width: 100%;
   display: grid;
   gap: 16px;
 }

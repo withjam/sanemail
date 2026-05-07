@@ -337,7 +337,7 @@ function Dashboard() {
     queryKey: queryKeys.home,
     queryFn: getHome,
   });
-  const [activeTab, setActiveTab] = useState<"mostRecent" | "needsReply" | "upcoming">("mostRecent");
+  const [activeTab, setActiveTab] = useState<"mostRecent" | "needsReply" | "upcoming">("needsReply");
 
   if (status.isError) return <ErrorPanel title="Could not load status" error={status.error} />;
   if (home.isError) return <ErrorPanel title="Could not load home" error={home.error} />;
@@ -346,16 +346,16 @@ function Dashboard() {
   const statusData = status.data;
   const tabs = home.data.tabs;
   const tabItems = [
-    { id: "mostRecent" as const, label: "Most recent", messages: tabs.mostRecent },
     { id: "needsReply" as const, label: "Needs attention", messages: tabs.needsReply },
     { id: "upcoming" as const, label: "Upcoming", messages: tabs.upcoming },
+    { id: "mostRecent" as const, label: "Most recent", messages: tabs.mostRecent },
   ];
   const active = tabItems.find((item) => item.id === activeTab) || tabItems[0];
 
   return (
     <div className="page-grid">
       <section className="page-heading">
-        <h1>Today</h1>
+        <h1>Home</h1>
       </section>
       <BriefingPanel briefing={home.data.briefing} />
       {!statusData.account && (
@@ -404,7 +404,6 @@ function BriefingPanel({ briefing }: { briefing: InboxBriefing }) {
         briefing.narrative.needsAttention,
       ].filter(Boolean)
     : [briefing.text];
-  const callouts = briefing.callouts || [];
 
   return (
     <section className="briefing-content" data-testid="inbox-briefing">
@@ -413,39 +412,6 @@ function BriefingPanel({ briefing }: { briefing: InboxBriefing }) {
           <p key={paragraph}>{paragraph}</p>
         ))}
       </div>
-      {callouts.length > 0 && (
-        <div className="briefing-callouts" aria-label="Items needing attention">
-          {callouts.map((callout) => {
-            const content = (
-              <>
-                <span className={`briefing-callout-label ${callout.kind}`}>{callout.label}</span>
-                <strong>{callout.title}</strong>
-                <span>{callout.body}</span>
-              </>
-            );
-
-            if (!callout.messageId) {
-              return (
-                <div className="briefing-callout" key={callout.id}>
-                  {content}
-                </div>
-              );
-            }
-
-            return (
-              <Link
-                to="/message/$messageId"
-                params={{ messageId: callout.messageId }}
-                className="briefing-callout linked"
-                key={callout.id}
-                data-testid={`briefing-callout-${callout.kind}`}
-              >
-                {content}
-              </Link>
-            );
-          })}
-        </div>
-      )}
     </section>
   );
 }
