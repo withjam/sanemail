@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { run, runOnce } from "graphile-worker";
-import { loadConfig } from "./config.mjs";
+import { assertProductionConfig, loadConfig } from "./config.mjs";
 import { claimNextJob, completeJob, failJob } from "./queue.mjs";
 import { runClassificationBatch, runDailyBrief } from "./ai/pipeline.mjs";
 import { syncSourceConnection } from "./source-sync.mjs";
@@ -153,22 +153,45 @@ export async function runWorkerOnce() {
   }
 }
 
+let stopRequested = false;
+
+export function requestWorkerStop() {
+  stopRequested = true;
+}
+
 export async function runWorkerLoop() {
   const config = loadConfig();
+  assertProductionConfig(config);
   if (isGraphileDriver(config)) {
     console.log("SaneMail Graphile Worker running against Postgres");
     const runner = await run(graphileOptions(config), graphileTaskList());
+    const handleSignal = async () => {
+      stopRequested = true;
+      try {
+        await runner.stop();
+      } catch (error) {
+        console.error("graceful worker stop failed:", error);
+      }
+    };
+    process.once("SIGTERM", handleSignal);
+    process.once("SIGINT", handleSignal);
     await runner.promise;
     return;
   }
 
   const pollIntervalMs = config.queue.pollIntervalMs;
   console.log(`SaneMail local queue worker polling every ${pollIntervalMs}ms`);
+  const handleSignal = () => {
+    stopRequested = true;
+  };
+  process.once("SIGTERM", handleSignal);
+  process.once("SIGINT", handleSignal);
 
-  while (true) {
+  while (!stopRequested) {
     const result = await runWorkerOnce();
-    if (!result.processed) await sleep(pollIntervalMs);
+    if (!result.processed && !stopRequested) await sleep(pollIntervalMs);
   }
+  console.log("worker loop exiting cleanly");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

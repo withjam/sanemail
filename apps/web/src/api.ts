@@ -8,6 +8,7 @@ import type {
   HomeResponse,
   MessageResponse,
   MessagesResponse,
+  RecentClassificationsResponse,
   StatusResponse,
   SyncResponse,
   SyntheticIngestionResponse,
@@ -147,6 +148,12 @@ export function runAiVerification() {
     method: "POST",
     body: JSON.stringify({}),
   });
+}
+
+export function getRecentClassifications(limit = 15) {
+  return apiFetch<RecentClassificationsResponse>(
+    `/api/ai/classifications/recent?limit=${encodeURIComponent(String(limit))}`,
+  );
 }
 
 /**

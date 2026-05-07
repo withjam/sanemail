@@ -4,8 +4,21 @@ import { access, stat } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { loadConfig, validateGoogleConfig, validateSecurityConfig } from "./config.mjs";
+import {
+  assertProductionConfig,
+  loadConfig,
+  validateGoogleConfig,
+  validateSecurityConfig,
+} from "./config.mjs";
 import { AuthError, describeAuthMode, requireUser } from "./auth.mjs";
+import {
+  applyCors,
+  attachRequestId,
+  createRateLimiter,
+  HttpError,
+  logRequest,
+  readJsonBody,
+} from "./http-middleware.mjs";
 import {
   buildGoogleAuthUrl,
   exchangeCodeForTokens,
@@ -19,6 +32,7 @@ import {
   getPrimarySourceConnection,
   latestInboxBriefing,
   listAiRunsFor,
+  listRecentClassificationsFor,
   listVerificationRuns,
   readStoreFor,
   saveFeedback,
@@ -186,10 +200,7 @@ function publicAccount(account) {
 }
 
 async function parseJsonBody(request) {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  if (!chunks.length) return {};
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  return readJsonBody(request);
 }
 
 async function routeStatus(userId, response) {
@@ -602,6 +613,26 @@ async function handleApi(url, request, response) {
   if (!principal) return;
   await ensureUserRecord(principal.userId, principal.email);
   const { userId } = principal;
+  request.userId = userId;
+
+  // Cap LLM-driven routes per-user. Read-only routes are not limited because
+  // they are cheap and the UI polls some of them.
+  if (isAiRoute(url.pathname) && request.method === "POST") {
+    const limit = aiRateLimiter.check(userId);
+    if (!limit.allowed) {
+      response.setHeader("Retry-After", Math.ceil(limit.retryAfterMs / 1000));
+      sendJson(
+        response,
+        {
+          error: "rate_limited",
+          message: "Too many AI requests. Try again shortly.",
+          retryAfterMs: limit.retryAfterMs,
+        },
+        429,
+      );
+      return;
+    }
+  }
 
   if (request.method === "GET" && url.pathname === "/api/home") return routeHome(userId, response);
   if (request.method === "GET" && url.pathname === "/api/messages") return routeMessages(userId, response);
@@ -619,6 +650,11 @@ async function handleApi(url, request, response) {
   }
   if (request.method === "GET" && url.pathname === "/api/ai/verification") {
     return sendJson(response, { runs: await listVerificationRuns(50) });
+  }
+  if (request.method === "GET" && url.pathname === "/api/ai/classifications/recent") {
+    const limitParam = Number(url.searchParams.get("limit"));
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(100, Math.floor(limitParam)) : 15;
+    return sendJson(response, { classifications: await listRecentClassificationsFor(userId, limit) });
   }
   if (request.method === "POST" && url.pathname === "/api/ai/run") return routeAiRun(userId, request, response);
   if (request.method === "POST" && url.pathname === "/api/ai/verify") return routeAiVerify(response);
@@ -644,17 +680,92 @@ async function handleApi(url, request, response) {
   sendJson(response, { error: "not_found" }, 404);
 }
 
+async function pingDatabase() {
+  if (config.storage.driver !== "postgres") {
+    return { ok: true, driver: config.storage.driver, skipped: true };
+  }
+  const start = Date.now();
+  try {
+    const { databasePing } = await import("./postgres-store.mjs");
+    await databasePing();
+    return { ok: true, driver: "postgres", durationMs: Date.now() - start };
+  } catch (error) {
+    return {
+      ok: false,
+      driver: "postgres",
+      durationMs: Date.now() - start,
+      error: error.message || String(error),
+    };
+  }
+}
+
+async function routeHealth(response) {
+  // Liveness: the process is up and responding. Don't touch external deps.
+  sendJson(response, {
+    ok: true,
+    pid: process.pid,
+    uptimeSeconds: Math.round(process.uptime()),
+  });
+}
+
+async function routeReady(response) {
+  // Readiness: don't take traffic until DB is reachable.
+  const db = await pingDatabase();
+  const ok = Boolean(db.ok);
+  sendJson(response, { ok, db }, ok ? 200 : 503);
+}
+
+// Per-user limiter on AI routes — these spawn LLM calls that cost real money,
+// so we cap a single user's burst even before they cost the worker.
+const aiRateLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
+// Per-IP limiter on the unauthenticated OAuth callback to make state-replay
+// brute-force attempts expensive.
+const oauthRateLimiter = createRateLimiter({ windowMs: 60_000, max: 60 });
+
+function clientIpForRequest(request) {
+  const fwd = request.headers["x-forwarded-for"];
+  if (typeof fwd === "string" && fwd) return fwd.split(",")[0].trim();
+  return request.socket?.remoteAddress || "unknown";
+}
+
+function isAiRoute(pathname) {
+  return pathname.startsWith("/api/ai/");
+}
+
 async function handleRequest(request, response) {
-  const url = new URL(request.url, config.appOrigin);
+  attachRequestId(request, response);
+  logRequest(request, response);
+
+  let url;
+  try {
+    url = new URL(request.url, config.appOrigin);
+  } catch {
+    sendJson(response, { error: "bad_request" }, 400);
+    return;
+  }
+
+  if (applyCors(request, response, config)) return;
 
   try {
+    if (request.method === "GET" && url.pathname === "/health") return routeHealth(response);
+    if (request.method === "GET" && url.pathname === "/ready") return routeReady(response);
     if (url.pathname === "/connect/gmail") {
       const principal = authenticateRequest(request, response);
       if (!principal) return;
+      request.userId = principal.userId;
       await ensureUserRecord(principal.userId, principal.email);
       return routeConnectGmail(principal.userId, response);
     }
-    if (url.pathname === "/oauth/google/callback") return routeOAuthCallback(url, response);
+    if (url.pathname === "/oauth/google/callback") {
+      const ip = clientIpForRequest(request);
+      const limit = oauthRateLimiter.check(ip);
+      if (!limit.allowed) {
+        response.setHeader("Retry-After", Math.ceil(limit.retryAfterMs / 1000));
+        sendJson(response, { error: "rate_limited" }, 429);
+        return;
+      }
+      return routeOAuthCallback(url, response);
+    }
     if (url.pathname.startsWith("/api/")) return handleApi(url, request, response);
 
     if (!["GET", "HEAD"].includes(request.method)) {
@@ -664,7 +775,19 @@ async function handleRequest(request, response) {
 
     return serveStatic(url, response);
   } catch (error) {
-    console.error(error);
+    if (error instanceof HttpError) {
+      sendJson(response, { error: error.code, message: error.message }, error.status);
+      return;
+    }
+    console.error(JSON.stringify({
+      ts: new Date().toISOString(),
+      level: "error",
+      msg: "request_error",
+      requestId: request.requestId,
+      route: url?.pathname,
+      error: error.message,
+      stack: error.stack,
+    }));
     sendJson(response, { error: "internal_error", message: error.message }, 500);
   }
 }
@@ -692,8 +815,34 @@ function logOllamaBoot() {
   });
 }
 
+export function installGracefulShutdown(server, { timeoutMs = 25_000 } = {}) {
+  let shuttingDown = false;
+  const handle = (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[shutdown] received ${signal}, draining connections`);
+    const force = setTimeout(() => {
+      console.error("[shutdown] timeout exceeded, forcing exit");
+      process.exit(1);
+    }, timeoutMs);
+    force.unref?.();
+    server.close((error) => {
+      if (error) {
+        console.error("[shutdown] server.close error", error);
+        process.exit(1);
+      }
+      console.log("[shutdown] all connections drained");
+      process.exit(0);
+    });
+  };
+  process.once("SIGTERM", () => handle("SIGTERM"));
+  process.once("SIGINT", () => handle("SIGINT"));
+}
+
 export function startServer() {
+  assertProductionConfig(config);
   const server = createServer();
+  installGracefulShutdown(server);
   server.listen(config.port, config.host, () => {
     const address = server.address();
     const origin =

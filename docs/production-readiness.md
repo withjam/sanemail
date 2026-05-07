@@ -212,36 +212,75 @@ hand-rolled routing. Production needs:
 The work above is large. Tackle in this order so each phase is independently
 shippable.
 
-### Phase 1 — Multi-tenant API (no deploy)
+### Phase 1 — Multi-tenant API (no deploy) — ✅ Complete
 
-- Supabase JWT verification middleware.
-- `users` table + first-seen upsert.
-- Refactor `store.mjs` and routes to take `userId` everywhere.
-- Delete every `store.accounts[0]` reference.
-- `bun run verify` green against Postgres backend.
+Delivered:
 
-Exit criteria: two seeded users in a local Postgres can hit `/api/home` with
-their own JWTs and see only their own data.
+- Supabase JWT verification middleware (HS256), `requireUser`, dev bypass
+  via `DEV_USER_ID` (refused in production).
+- `users` table + `ensureUserRecord` upsert on first authenticated request.
+- User-scoped store APIs: `readStoreFor`, `listAiRunsFor`, `clearUserData`,
+  `getPrimarySourceConnection`, `ensureUserRecord`.
+- Every `/api/*` route now derives `userId` from the request; no
+  `store.accounts[0]` survives in route code.
+- `oauth_states.user_id` migration; `consumeOAuthState` returns the bound
+  user.
+- Worker job payloads require `userId`.
+- 12 JWT tests + 3 isolation tests, all green; full `bun run verify`
+  passes.
+- Web app wired to Supabase: sign-in/sign-up screen, session-aware
+  `apiFetch`, sign-out, query cache flushed on identity change. Gmail
+  connect routed through a JSON endpoint that can carry the bearer.
 
-### Phase 2 — Production hygiene
+Exit criteria met: two seeded users hit `/api/home` with their own JWTs
+and see only their own data.
 
-- `/health`, `/ready`, graceful shutdown.
-- CORS allowlist, body size cap, request timeout, request-id logging.
-- Rate limiting on AI routes.
-- Encryption key versioning.
-- Encrypt message bodies at rest.
-- Forbid `STORE_DRIVER=json` when `NODE_ENV=production`.
+### Phase 2 — Production hygiene — In progress
 
-Exit criteria: server passes a basic abuse test (oversized body, missing
-auth, expired JWT, replayed OAuth state) without crashing or leaking data.
+Tracked at the top of this document. The five items below in this order:
+
+1. **Storage gate.** `loadConfig()` refuses `STORE_DRIVER=json` and falls
+   back to a fatal error when `NODE_ENV=production`. Same gate forbids
+   `DEV_USER_ID` in prod (already in place; verify covered by tests).
+2. **Lifecycle endpoints + graceful shutdown.** Add `/health` (returns 200
+   when DB ping succeeds) and `/ready` (stricter, used by the Fly release
+   gate). SIGTERM closes the HTTP server, drains in-flight requests, exits
+   the worker poll loop.
+3. **Request hardening.** CORS allowlist driven by `WEB_ORIGIN`; bounded
+   `parseJsonBody` (1 MB, 10s read timeout); reject everything else.
+4. **Rate limiting.** Per-user token bucket on AI routes
+   (`/api/ai/run`, `/api/ai/verify`, `/api/ai/ingestion/*`) and per-IP on
+   the OAuth callback. In-memory is fine for a single Fly machine; Postgres
+   counter when we scale.
+5. **Structured logging.** `console.log` replaced with single-line JSON
+   per request: `{ ts, level, requestId, userId, route, status, durMs }`.
+   Errors include the stack. Worker jobs share the same shape.
+
+Deferred to Phase 4 (not blockers for first beta):
+
+- Encryption key versioning (multi-version `decryptJson`).
+- Encrypt message bodies at rest in the JSON store path. (Postgres path
+  already encrypts.)
+- Sentry / external error reporting.
+
+Exit criteria: server passes the abuse checklist —
+- oversized body returns 413 without crashing.
+- missing/expired/tampered JWT returns 401 without leaking data.
+- replayed OAuth state is rejected.
+- AI route bursts past the rate limit return 429.
+- SIGTERM during a run drains cleanly; no half-written rows.
+- `STORE_DRIVER=json` with `NODE_ENV=production` refuses to start.
 
 ### Phase 3 — Fly + Neon deploy (private beta)
 
 - `fly.toml` with `web` + `worker` processes.
 - Fly secrets populated.
 - Neon project provisioned (prod branch + dev branch).
-- `release_command` runs migrations.
-- Sentry (or equivalent) wired up.
+- `release_command` runs `graphile-migrate migrate`.
+- Commit `migrations/current.sql` (the `oauth_states.user_id` change from
+  Phase 1) before the first deploy.
+- Remove the legacy `GET /api/connect/gmail` route — it's dead code now
+  that the SPA uses `POST /api/connect/gmail/start`.
 - Google OAuth client configured with the Fly hostname; up to 100 invited
   test users.
 
@@ -250,6 +289,10 @@ Gmail, and get a daily brief end-to-end on the deployed instance.
 
 ### Phase 4 — Pre-public-launch
 
+- Encryption key versioning (rotation without re-encrypting all rows).
+- Encrypt message bodies in the JSON store path (defensive; JSON is
+  dev-only in prod).
+- Sentry (or equivalent) wired up for the API and worker.
 - Google OAuth verification + CASA assessment kicked off.
 - Move worker from polling to scheduled triggers so it autostops.
 - Postgres-backed rate limiting (multi-instance safe).

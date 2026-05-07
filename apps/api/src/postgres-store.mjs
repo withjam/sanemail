@@ -31,6 +31,11 @@ async function withClient(callback) {
   }
 }
 
+export async function databasePing() {
+  await withClient((client) => client.query("select 1"));
+  return { ok: true };
+}
+
 async function withTransaction(callback) {
   return withClient(async (client) => {
     await client.query("begin");
@@ -293,6 +298,92 @@ function addressListJson(value) {
   return JSON.stringify(value ? [{ raw: value }] : []);
 }
 
+const EMAIL_REGEX = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+
+function parseAddressList(value) {
+  if (!value) return [];
+  const raw = Array.isArray(value)
+    ? value.flatMap((item) => (item && typeof item === "object" ? [item.raw || ""] : [String(item || "")]))
+    : [String(value)];
+  const out = [];
+  const seen = new Set();
+  for (const entry of raw) {
+    for (const piece of String(entry).split(/[,;]/)) {
+      const trimmed = piece.trim();
+      if (!trimmed) continue;
+      const match = trimmed.match(EMAIL_REGEX);
+      if (!match) continue;
+      const email = match[0].toLowerCase();
+      if (seen.has(email)) continue;
+      seen.add(email);
+      const nameMatch = trimmed.match(/^"?([^"<]+?)"?\s*<[^>]+>$/);
+      const name = nameMatch ? nameMatch[1].trim() : null;
+      out.push({ email, name: name || null });
+    }
+  }
+  return out;
+}
+
+async function bumpContactFrequency(client, userId, message, sourceAccount, receivedAt) {
+  if (!userId) return;
+  const userEmail = (sourceAccount?.email || "").toLowerCase();
+  const fromEntries = parseAddressList(message.from);
+  const sender = fromEntries[0] || null;
+  const isSentByUser = userEmail && sender?.email === userEmail;
+
+  if (isSentByUser) {
+    const recipients = [
+      ...parseAddressList(message.to),
+      ...parseAddressList(message.cc),
+    ];
+    const seen = new Set();
+    for (const recipient of recipients) {
+      if (!recipient.email || recipient.email === userEmail) continue;
+      if (seen.has(recipient.email)) continue;
+      seen.add(recipient.email);
+      await client.query(
+        `
+          insert into contact_frequency (
+            user_id, contact_email, contact_name,
+            sent_count, last_sent_at, updated_at
+          )
+          values ($1, $2, $3, 1, $4, now())
+          on conflict (user_id, contact_email) do update
+            set sent_count = contact_frequency.sent_count + 1,
+                last_sent_at = greatest(
+                  coalesce(contact_frequency.last_sent_at, excluded.last_sent_at),
+                  excluded.last_sent_at
+                ),
+                contact_name = coalesce(contact_frequency.contact_name, excluded.contact_name),
+                updated_at = now()
+        `,
+        [userId, recipient.email, recipient.name, receivedAt],
+      );
+    }
+    return;
+  }
+
+  if (!sender || !sender.email || sender.email === userEmail) return;
+  await client.query(
+    `
+      insert into contact_frequency (
+        user_id, contact_email, contact_name,
+        received_count, last_received_at, updated_at
+      )
+      values ($1, $2, $3, 1, $4, now())
+      on conflict (user_id, contact_email) do update
+        set received_count = contact_frequency.received_count + 1,
+            last_received_at = greatest(
+              coalesce(contact_frequency.last_received_at, excluded.last_received_at),
+              excluded.last_received_at
+            ),
+            contact_name = coalesce(contact_frequency.contact_name, excluded.contact_name),
+            updated_at = now()
+    `,
+    [userId, sender.email, sender.name, receivedAt],
+  );
+}
+
 function messageFromRow(row) {
   const metadata = row.source_metadata || {};
   const body = row.encrypted_body
@@ -474,6 +565,10 @@ export async function upsertSyncedMessages(account, messages = []) {
         `,
         [message.id, userId, receivedAt, inputHash],
       );
+
+      if (!existed.rowCount) {
+        await bumpContactFrequency(client, userId, message, sourceAccount, receivedAt);
+      }
 
       if (existed.rowCount) updated += 1;
       else inserted += 1;
@@ -983,14 +1078,14 @@ export async function recordAiRun(run) {
             insert into message_classifications (
               id, message_id, user_id, system_category, needs_reply,
               automated, possible_junk, direct, score, confidence, reasons,
-              action_metadata, model_provider, model, prompt_id, prompt_version,
+              action_metadata, summary, model_provider, model, prompt_id, prompt_version,
               input_hash, created_at
             )
             values (
               $1, $2, $3, $4, $5,
               $6, $7, $8, $9, $10, $11::jsonb,
-              $12::jsonb, $13, $14, $15, $16,
-              $17, $18
+              $12::jsonb, $13, $14, $15, $16, $17,
+              $18, $19
             )
           `,
           [
@@ -1006,6 +1101,7 @@ export async function recordAiRun(run) {
             Number(decision.confidence || 0),
             JSON.stringify(decision.reasons || []),
             JSON.stringify(decision.extracted || {}),
+            typeof decision.summary === "string" && decision.summary.trim() ? decision.summary.trim() : null,
             run.provider?.name || null,
             run.provider?.model || null,
             run.promptRefs?.find((prompt) => prompt.id === "mail-message-classification")?.id || null,
@@ -1045,6 +1141,65 @@ export async function recordAiRun(run) {
 
 export async function listAiRuns(limit = 50) {
   return withClient((client) => aiRunRows(client, limit));
+}
+
+export async function listRecentClassifications(userId, limit = 15) {
+  if (!userId) return [];
+  const cap = Math.min(100, Math.max(1, Math.floor(Number(limit) || 15)));
+  return withClient(async (client) => {
+    const result = await client.query(
+      `
+        select
+          mc.id,
+          mc.message_id,
+          mc.system_category,
+          mc.needs_reply,
+          mc.automated,
+          mc.possible_junk,
+          mc.direct,
+          mc.score,
+          mc.confidence,
+          mc.reasons,
+          mc.summary,
+          mc.model_provider,
+          mc.model,
+          mc.prompt_id,
+          mc.prompt_version,
+          mc.created_at,
+          m.subject,
+          m.from_addr,
+          m.received_at
+        from message_classifications mc
+        join messages m on m.id = mc.message_id
+        where mc.user_id = $1
+          and m.deleted_at is null
+        order by mc.created_at desc
+        limit $2
+      `,
+      [userId, cap],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      messageId: row.message_id,
+      subject: row.subject || "(no subject)",
+      from: row.from_addr?.raw || "",
+      receivedAt: row.received_at?.toISOString?.() || row.received_at || null,
+      category: row.system_category,
+      needsReply: Boolean(row.needs_reply),
+      automated: Boolean(row.automated),
+      possibleJunk: Boolean(row.possible_junk),
+      direct: Boolean(row.direct),
+      score: Number(row.score || 0),
+      confidence: Number(row.confidence || 0),
+      reasons: Array.isArray(row.reasons) ? row.reasons : [],
+      summary: row.summary || null,
+      modelProvider: row.model_provider || null,
+      model: row.model || null,
+      promptId: row.prompt_id || null,
+      promptVersion: row.prompt_version || null,
+      classifiedAt: row.created_at?.toISOString?.() || row.created_at,
+    }));
+  });
 }
 
 export async function saveVerificationRun(run) {

@@ -50,6 +50,12 @@ function textForMessage(message) {
   return `${message.subject || ""}\n${message.snippet || ""}\n${message.bodyText || ""}`;
 }
 
+function wordCountForMessage(message) {
+  const body = `${message.subject || ""} ${message.bodyText || message.snippet || ""}`;
+  const tokens = body.trim().split(/\s+/).filter(Boolean);
+  return tokens.length;
+}
+
 function ageHours(message) {
   const time = new Date(message.date || Number(message.internalDate) || 0).getTime();
   if (!Number.isFinite(time)) return 9999;
@@ -242,6 +248,8 @@ function decisionForMessage(message, account, feedback) {
     feedback: feedbackKinds.join(", "),
   });
 
+  const wordCount = wordCountForMessage(message);
+
   return {
     messageId: message.id,
     subject: message.subject,
@@ -263,6 +271,8 @@ function decisionForMessage(message, account, feedback) {
       within7Days: messageAgeHours <= 168,
     },
     reasons: rank.rankingReasons,
+    summary: null,
+    wordCount,
     extracted: {
       actions,
       deadlines,

@@ -10,7 +10,6 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@sanemail/shared": "workspace:*",
     "@supabase/supabase-js": "^2.105.3",
     "@togomail/shared": "workspace:*",
     "@tanstack/query-sync-storage-persister": "^5.90.7",

@@ -655,3 +655,29 @@ export type AiVerificationResponse = {
   ok: true;
   run: AiVerificationRun;
 };
+
+export type RecentClassification = {
+  id: string;
+  messageId: string;
+  subject: string;
+  from: string;
+  receivedAt: string | null;
+  category: SaneCategory;
+  needsReply: boolean;
+  automated: boolean;
+  possibleJunk: boolean;
+  direct: boolean;
+  score: number;
+  confidence: number;
+  reasons: string[];
+  summary: string | null;
+  modelProvider: string | null;
+  model: string | null;
+  promptId: string | null;
+  promptVersion: string | null;
+  classifiedAt: string | null;
+};
+
+export type RecentClassificationsResponse = {
+  classifications: RecentClassification[];
+};

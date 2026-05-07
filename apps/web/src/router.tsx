@@ -47,6 +47,7 @@ import type {
   MailMessage,
   MailProvider,
   PhoenixObservabilityStatus,
+  RecentClassification,
   StatusResponse,
   SyntheticIngestionResponse,
 } from "@togomail/shared/types";
@@ -57,6 +58,7 @@ import {
   getHome,
   getMessage,
   getMessages,
+  getRecentClassifications,
   getStatus,
   getToday,
   runDailyBrief,
@@ -683,6 +685,10 @@ function AiOpsRoute() {
     queryKey: queryKeys.aiControl,
     queryFn: getAiControl,
   });
+  const recentClassificationsQuery = useQuery({
+    queryKey: queryKeys.recentClassifications,
+    queryFn: () => getRecentClassifications(15),
+  });
   const runMutation = useMutation({
     mutationFn: (options: { mode: AiRunMode; limit: number }) => runDailyBrief(options),
     onSuccess: () => {
@@ -709,6 +715,7 @@ function AiOpsRoute() {
     mutationFn: () => classifyUnclassifiedMessages({ limit: classificationLimit }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.aiControl });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.recentClassifications });
       void queryClient.invalidateQueries({ queryKey: queryKeys.status });
       void queryClient.invalidateQueries({ queryKey: queryKeys.home });
       void queryClient.invalidateQueries({ queryKey: queryKeys.messages });
@@ -906,6 +913,27 @@ function AiOpsRoute() {
         </div>
         {latestRun ? <DecisionList run={latestRun} /> : <EmptyState text="No AI run has been recorded yet." />}
       </section>
+      <section className="surface flush" data-testid="ai-recent-classifications">
+        <div className="section-header padded-header">
+          <div>
+            <h2>Recent classifications</h2>
+            <p>
+              {recentClassificationsQuery.data
+                ? `Last ${recentClassificationsQuery.data.classifications.length} persisted classification rows across all runs.`
+                : "Loading persisted classifications…"}
+            </p>
+          </div>
+        </div>
+        {recentClassificationsQuery.isError ? (
+          <EmptyState text="Could not load recent classifications." />
+        ) : recentClassificationsQuery.data && recentClassificationsQuery.data.classifications.length ? (
+          <RecentClassificationsList items={recentClassificationsQuery.data.classifications} />
+        ) : recentClassificationsQuery.isLoading ? (
+          <EmptyState text="Loading…" />
+        ) : (
+          <EmptyState text="No classifications have been persisted yet." />
+        )}
+      </section>
       <section className="surface">
         <div className="section-header">
           <div>
@@ -1024,6 +1052,34 @@ function DecisionList({ run }: { run: AiRun }) {
             <span className={classForCategory(decision.category)}>{decision.category}</span>
             <span className="pill">rank {decision.recsysScore}</span>
             <span className="pill">conf {formatPercent(decision.confidence)}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RecentClassificationsList({ items }: { items: RecentClassification[] }) {
+  return (
+    <div className="decision-list">
+      {items.map((item) => (
+        <div className="decision-row" key={item.id} data-testid="ai-recent-classification-row">
+          <div>
+            <div className="subject-line">{item.subject}</div>
+            <div className="snippet">
+              {senderName(item.from)}
+              {item.classifiedAt ? <> · {formatDate(item.classifiedAt)}</> : null}
+              {item.model ? <> · {item.model}</> : null}
+            </div>
+            {item.summary ? <div className="snippet">{item.summary}</div> : null}
+          </div>
+          <div className="row-meta">
+            <span className={classForCategory(item.category)}>{item.category}</span>
+            {item.needsReply ? <span className="pill">reply</span> : null}
+            {item.possibleJunk ? <span className="pill danger">junk?</span> : null}
+            {item.automated ? <span className="pill">auto</span> : null}
+            <span className="pill">score {Math.round(item.score)}</span>
+            <span className="pill">conf {formatPercent(item.confidence)}</span>
           </div>
         </div>
       ))}

@@ -67,7 +67,7 @@ const promptDefinitions = [
   },
   {
     id: "mail-message-classification",
-    version: "2026-05-05.1",
+    version: "2026-05-07.1",
     stage: "classification",
     title: "Single message classification",
     description:
@@ -86,6 +86,7 @@ const promptDefinitions = [
       score: "number",
       confidence: "number",
       reasons: "string[]",
+      summary: "string | null",
       actionKinds: "string[]",
       deadlines: "string[]",
       entityKeys: "string[]",
@@ -114,6 +115,7 @@ const promptDefinitions = [
       "Prefer existing active taxonomy types when they fit.",
       "Suggest candidate types only when the evidence is specific and reusable.",
       "Be conservative about junk, scams, and security alerts.",
+      "When the message body has more than 50 words, write a single neutral sentence (under 30 words) capturing what the message is about. Otherwise return null for summary.",
       "Return compact JSON only.",
     ].join(" "),
     userTemplate:

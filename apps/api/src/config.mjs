@@ -175,5 +175,25 @@ export function validateSecurityConfig(config) {
   if (inProd && config.auth.devUserId) {
     missing.push("DEV_USER_ID_must_not_be_set_in_production");
   }
+  if (inProd && config.storage.driver !== "postgres") {
+    missing.push("STORE_DRIVER_must_be_postgres_in_production");
+  }
+  if (inProd && !config.database.url) {
+    missing.push("DATABASE_URL");
+  }
   return missing;
+}
+
+/**
+ * Hard-fails when production prerequisites are missing. Call from server +
+ * worker entry points so we crash on boot rather than serve traffic with a
+ * misconfigured environment.
+ */
+export function assertProductionConfig(config) {
+  if (config.env !== "production") return;
+  const missing = validateSecurityConfig(config);
+  if (!missing.length) return;
+  throw new Error(
+    `Refusing to start in production with invalid configuration: ${missing.join(", ")}`,
+  );
 }

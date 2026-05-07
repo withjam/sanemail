@@ -299,6 +299,14 @@ function normalizeCategory(value, fallback) {
   return categories[normalized] || fallback;
 }
 
+function normalizeSummary(value, wordCount) {
+  if (!Number.isFinite(wordCount) || wordCount <= 50) return null;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.length > 400 ? `${trimmed.slice(0, 397)}...` : trimmed;
+}
+
 function normalizeDecision(payload, fallback) {
   const category = normalizeCategory(payload.category, fallback.category);
   const possibleJunk =
@@ -309,6 +317,7 @@ function normalizeDecision(payload, fallback) {
   const actions = stringArray(payload.actions || payload.extracted?.actions);
   const deadlines = stringArray(payload.deadlines || payload.extracted?.deadlines);
   const entities = stringArray(payload.entities || payload.extracted?.entities);
+  const summary = normalizeSummary(payload.summary, fallback.wordCount);
 
   return {
     category,
@@ -322,6 +331,7 @@ function normalizeDecision(payload, fallback) {
         ? payload.suppressFromToday
         : possibleJunk || automated,
     reasons: stringArray(payload.reasons).length ? stringArray(payload.reasons) : fallback.reasons,
+    summary,
     extracted: {
       actions: actions.length ? actions : fallback.extracted.actions,
       deadlines: deadlines.length ? deadlines : fallback.extracted.deadlines,
@@ -523,6 +533,12 @@ function buildMessages(message, fallback) {
     feedback: "",
   });
 
+  const wordCount = Number.isFinite(fallback.wordCount) ? fallback.wordCount : 0;
+  const summaryClause =
+    wordCount > 50
+      ? `Write a single neutral sentence (under 30 words) summarizing the message in the "summary" field. Body word count: ${wordCount}.`
+      : `The body has only ${wordCount} words; return summary: null.`;
+
   return [
     {
       role: "system",
@@ -532,7 +548,8 @@ function buildMessages(message, fallback) {
         "Return only compact JSON. Do not include markdown.",
         "Allowed categories: Today, Needs Reply, FYI, Junk Review, All Mail.",
         "Be conservative about scam and junk detection.",
-        "Schema: {\"category\":string,\"needsReply\":boolean,\"possibleJunk\":boolean,\"automated\":boolean,\"confidence\":number,\"recsysScore\":number,\"suppressFromToday\":boolean,\"reasons\":string[],\"actions\":string[],\"deadlines\":string[],\"entities\":string[]}",
+        summaryClause,
+        "Schema: {\"category\":string,\"needsReply\":boolean,\"possibleJunk\":boolean,\"automated\":boolean,\"confidence\":number,\"recsysScore\":number,\"suppressFromToday\":boolean,\"reasons\":string[],\"summary\":string|null,\"actions\":string[],\"deadlines\":string[],\"entities\":string[]}",
       ].join(" "),
     },
     {

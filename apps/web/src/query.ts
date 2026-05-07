@@ -21,4 +21,5 @@ export const queryKeys = {
   today: ["today"] as const,
   message: (id: string) => ["message", id] as const,
   aiControl: ["ai-control"] as const,
+  recentClassifications: ["recent-classifications"] as const,
 };

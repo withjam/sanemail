@@ -569,3 +569,40 @@ This clears the local SaneMail store and repopulates it with a demo Gmail-shaped
 account plus realistic personal, automated, receipt, notification, and junk-like
 messages. It is used by the PWA E2E tests and by the Settings screen's
 `Reset demo data` action.
+
+## Planned: Sent Mail Ingestion
+
+Today's Gmail sync only pulls received mail (the default Gmail query excludes
+the `SENT` label). We want to extend ingestion to include messages the user
+sent, so that we can compute meaningful per-contact engagement signals.
+
+Motivation:
+
+- The `contact_frequency` table tracks `received_count` and `sent_count` per
+  `(user_id, contact_email)`. The **ratio of sent-to-received** is the
+  strongest local signal for "people the user actively engages with" versus
+  ignored mailing lists, transactional senders, and other noise. Without sent
+  mail, `sent_count` stays at zero and the ratio is uninformative.
+- Reply-rate features improve classification quality (downweight Today/Needs
+  Reply for senders the user never replies to; upweight conversations where
+  the user has replied recently).
+- The brief and Today surfaces can prefer threads the user has historically
+  participated in over equally-recent but one-sided threads.
+
+What needs to change:
+
+- `apps/api/src/source-sync.mjs`: run a second Gmail listing pass (or a single
+  pass with a query that includes both `INBOX` and `SENT`) and feed the
+  resulting messages through the same `upsertSyncedMessages` path.
+- The ingest path already keys `contact_frequency` off whether `from_addr`
+  matches the source connection's `source_email`, so once `SENT` messages
+  flow in, `sent_count` and `last_sent_at` will populate automatically.
+- Consider stamping outbound messages on `messages` (e.g. a `direction`
+  column or derived view) so product surfaces can filter or color-code them
+  without re-parsing addresses.
+- Backfill existing connections: a one-time job that pulls historical SENT
+  messages for already-connected accounts, bounded by the user's existing
+  ingestion window.
+
+OAuth scope check: the existing `gmail.readonly` scope already covers reading
+SENT mail, so no additional consent is required.

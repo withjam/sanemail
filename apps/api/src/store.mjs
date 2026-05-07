@@ -577,6 +577,52 @@ export async function listAiRunsFor(userId, limit = 50) {
     .slice(0, limit);
 }
 
+export async function listRecentClassificationsFor(userId, limit = 15) {
+  if (!userId) throw new Error("listRecentClassificationsFor requires a userId");
+  if (usePostgresStore()) return (await postgresStore()).listRecentClassifications(userId, limit);
+  // The JSON store does not maintain a normalized message_classifications table.
+  // Synthesize the shape from the most recent classification-batch run so the AI
+  // Ops UI is still useful in local dev.
+  const store = await readStoreFor(userId);
+  const messagesById = new Map((store.messages || []).map((message) => [message.id, message]));
+  const classificationRuns = (store.aiRuns || [])
+    .filter((run) => run.kind === "classification-batch")
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  const decisions = [];
+  const seen = new Set();
+  for (const run of classificationRuns) {
+    for (const decision of run.output?.decisions || []) {
+      if (seen.has(decision.messageId)) continue;
+      seen.add(decision.messageId);
+      const message = messagesById.get(decision.messageId);
+      decisions.push({
+        id: `${run.id}:${decision.messageId}`,
+        messageId: decision.messageId,
+        subject: decision.subject || message?.subject || "(no subject)",
+        from: decision.from || message?.from || "",
+        receivedAt: decision.deliveredAt || message?.date || null,
+        category: decision.category,
+        needsReply: Boolean(decision.needsReply),
+        automated: Boolean(decision.automated),
+        possibleJunk: Boolean(decision.possibleJunk),
+        direct: Boolean(decision.direct),
+        score: Number(decision.recsysScore || 0),
+        confidence: Number(decision.confidence || 0),
+        reasons: decision.reasons || [],
+        summary: decision.summary || null,
+        modelProvider: run.provider?.name || null,
+        model: run.provider?.model || null,
+        promptId: run.promptRefs?.find((p) => p.id === "mail-message-classification")?.id || null,
+        promptVersion: run.promptRefs?.find((p) => p.id === "mail-message-classification")?.version || null,
+        classifiedAt: run.completedAt || run.createdAt || null,
+      });
+      if (decisions.length >= limit) return decisions;
+    }
+    if (decisions.length >= limit) break;
+  }
+  return decisions;
+}
+
 export async function saveVerificationRun(run) {
   if (usePostgresStore()) return (await postgresStore()).saveVerificationRun(run);
   return mutateStore((store) => {
