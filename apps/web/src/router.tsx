@@ -49,7 +49,7 @@ import type {
   PhoenixObservabilityStatus,
   StatusResponse,
   SyntheticIngestionResponse,
-} from "@sanemail/shared/types";
+} from "@togomail/shared/types";
 import {
   classifyUnclassifiedMessages,
   disconnect,
@@ -141,9 +141,9 @@ function Shell() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <Link to="/" className="brand" aria-label="SaneMail home">
-          <span className="brand-mark">S</span>
-          <span>SaneMail</span>
+        <Link to="/" className="brand" aria-label="Togo Mail home">
+          <span className="brand-mark">T</span>
+          <span>Togo Mail</span>
         </Link>
         <nav className="nav-list" aria-label="Primary">
           {navItems.map((item) => {
@@ -1217,7 +1217,7 @@ function SettingsRoute() {
           <div className="section-header">
             <div>
               <h2>Add another source</h2>
-              <p>Bring more mail into SaneMail by connecting an additional provider.</p>
+              <p>Bring more mail into Togo Mail by connecting an additional provider.</p>
             </div>
           </div>
           <div className="add-source-list">

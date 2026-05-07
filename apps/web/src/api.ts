@@ -11,7 +11,7 @@ import type {
   StatusResponse,
   SyncResponse,
   SyntheticIngestionResponse,
-} from "@sanemail/shared/types";
+} from "@togomail/shared/types";
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
