@@ -351,6 +351,14 @@ export type AiEvalRecord = {
   hash: string;
 };
 
+/** Persisted as message_classifications.action_metadata (from AiDecision.extracted). */
+export type ClassificationExtractedMetadata = {
+  actions: string[];
+  deadlines: string[];
+  entities: string[];
+  replyCue: string | null;
+};
+
 export type AiDecision = {
   messageId: string;
   subject: string;
@@ -372,12 +380,7 @@ export type AiDecision = {
     within7Days: boolean;
   };
   reasons: string[];
-  extracted: {
-    actions: string[];
-    deadlines: string[];
-    entities: string[];
-    replyCue: string | null;
-  };
+  extracted: ClassificationExtractedMetadata;
   feedback?: {
     kinds: FeedbackKind[];
     latestKind: FeedbackKind | null;
@@ -671,6 +674,7 @@ export type RecentClassification = {
   confidence: number;
   reasons: string[];
   summary: string | null;
+  extracted: ClassificationExtractedMetadata;
   modelProvider: string | null;
   model: string | null;
   promptId: string | null;

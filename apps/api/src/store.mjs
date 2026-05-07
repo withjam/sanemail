@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { normalizeClassificationExtracted } from "./classification-metadata.mjs";
 import { loadConfig } from "./config.mjs";
 import { decryptJson, encryptJson } from "./security.mjs";
 
@@ -577,9 +578,19 @@ export async function listAiRunsFor(userId, limit = 50) {
     .slice(0, limit);
 }
 
+function attachExtractedFallback(rows) {
+  return rows.map((row) => ({
+    ...row,
+    extracted: normalizeClassificationExtracted(row.extracted),
+  }));
+}
+
 export async function listRecentClassificationsFor(userId, limit = 15) {
   if (!userId) throw new Error("listRecentClassificationsFor requires a userId");
-  if (usePostgresStore()) return (await postgresStore()).listRecentClassifications(userId, limit);
+  if (usePostgresStore()) {
+    const pg = await postgresStore();
+    return attachExtractedFallback(await pg.listRecentClassifications(userId, limit));
+  }
   // The JSON store does not maintain a normalized message_classifications table.
   // Synthesize the shape from the most recent classification-batch run so the AI
   // Ops UI is still useful in local dev.
@@ -610,17 +621,18 @@ export async function listRecentClassificationsFor(userId, limit = 15) {
         confidence: Number(decision.confidence || 0),
         reasons: decision.reasons || [],
         summary: decision.summary || null,
+        extracted: normalizeClassificationExtracted(decision.extracted),
         modelProvider: run.provider?.name || null,
         model: run.provider?.model || null,
         promptId: run.promptRefs?.find((p) => p.id === "mail-message-classification")?.id || null,
         promptVersion: run.promptRefs?.find((p) => p.id === "mail-message-classification")?.version || null,
         classifiedAt: run.completedAt || run.createdAt || null,
       });
-      if (decisions.length >= limit) return decisions;
+      if (decisions.length >= limit) return attachExtractedFallback(decisions);
     }
     if (decisions.length >= limit) break;
   }
-  return decisions;
+  return attachExtractedFallback(decisions);
 }
 
 export async function saveVerificationRun(run) {

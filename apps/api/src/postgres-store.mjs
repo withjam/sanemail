@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import pg from "pg";
+import { normalizeClassificationExtracted } from "./classification-metadata.mjs";
 import { loadConfig } from "./config.mjs";
 import { decryptJson, encryptJson, hashSensitiveValue } from "./security.mjs";
 
@@ -1143,12 +1144,39 @@ export async function listAiRuns(limit = 50) {
   return withClient((client) => aiRunRows(client, limit));
 }
 
-export async function listRecentClassifications(userId, limit = 15) {
-  if (!userId) return [];
-  const cap = Math.min(100, Math.max(1, Math.floor(Number(limit) || 15)));
-  return withClient(async (client) => {
-    const result = await client.query(
-      `
+function mapRecentClassificationRow(row) {
+  return {
+    id: row.id,
+    messageId: row.message_id,
+    subject: row.subject || "(no subject)",
+    from: row.from_addr?.raw || "",
+    receivedAt: row.received_at?.toISOString?.() || row.received_at || null,
+    category: row.system_category,
+    needsReply: Boolean(row.needs_reply),
+    automated: Boolean(row.automated),
+    possibleJunk: Boolean(row.possible_junk),
+    direct: Boolean(row.direct),
+    score: Number(row.score || 0),
+    confidence: Number(row.confidence || 0),
+    reasons: Array.isArray(row.reasons) ? row.reasons : [],
+    summary: row.summary ?? null,
+    extracted: normalizeClassificationExtracted(row.action_metadata),
+    modelProvider: row.model_provider || null,
+    model: row.model || null,
+    promptId: row.prompt_id || null,
+    promptVersion: row.prompt_version || null,
+    classifiedAt: row.created_at?.toISOString?.() || row.created_at,
+  };
+}
+
+function missingSummaryColumnError(error) {
+  return error?.code === "42703" && /summary/i.test(String(error.message || ""));
+}
+
+async function selectRecentClassifications(client, userId, cap, { includeSummary }) {
+  const summaryColumn = includeSummary ? "mc.summary,\n          " : "";
+  const result = await client.query(
+    `
         select
           mc.id,
           mc.message_id,
@@ -1160,8 +1188,8 @@ export async function listRecentClassifications(userId, limit = 15) {
           mc.score,
           mc.confidence,
           mc.reasons,
-          mc.summary,
-          mc.model_provider,
+          mc.action_metadata,
+          ${summaryColumn}mc.model_provider,
           mc.model,
           mc.prompt_id,
           mc.prompt_version,
@@ -1176,29 +1204,23 @@ export async function listRecentClassifications(userId, limit = 15) {
         order by mc.created_at desc
         limit $2
       `,
-      [userId, cap],
-    );
-    return result.rows.map((row) => ({
-      id: row.id,
-      messageId: row.message_id,
-      subject: row.subject || "(no subject)",
-      from: row.from_addr?.raw || "",
-      receivedAt: row.received_at?.toISOString?.() || row.received_at || null,
-      category: row.system_category,
-      needsReply: Boolean(row.needs_reply),
-      automated: Boolean(row.automated),
-      possibleJunk: Boolean(row.possible_junk),
-      direct: Boolean(row.direct),
-      score: Number(row.score || 0),
-      confidence: Number(row.confidence || 0),
-      reasons: Array.isArray(row.reasons) ? row.reasons : [],
-      summary: row.summary || null,
-      modelProvider: row.model_provider || null,
-      model: row.model || null,
-      promptId: row.prompt_id || null,
-      promptVersion: row.prompt_version || null,
-      classifiedAt: row.created_at?.toISOString?.() || row.created_at,
-    }));
+    [userId, cap],
+  );
+  return result.rows.map(mapRecentClassificationRow);
+}
+
+export async function listRecentClassifications(userId, limit = 15) {
+  if (!userId) return [];
+  const cap = Math.min(100, Math.max(1, Math.floor(Number(limit) || 15)));
+  return withClient(async (client) => {
+    try {
+      return await selectRecentClassifications(client, userId, cap, { includeSummary: true });
+    } catch (error) {
+      if (missingSummaryColumnError(error)) {
+        return selectRecentClassifications(client, userId, cap, { includeSummary: false });
+      }
+      throw error;
+    }
   });
 }
 

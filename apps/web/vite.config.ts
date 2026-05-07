@@ -2,6 +2,15 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
+/**
+ * Backend origin for dev proxy. Use API_PORT (not PORT): many environments set
+ * PORT to the Vite port (5173), which would proxy /api to the wrong process.
+ * Override fully with VITE_API_PROXY=http://127.0.0.1:3000
+ */
+const apiProxyOrigin =
+  process.env.VITE_API_PROXY ||
+  `http://${process.env.VITE_PROXY_API_HOST || "127.0.0.1"}:${process.env.API_PORT || "3000"}`;
+
 export default defineConfig({
   plugins: [
     react(),
@@ -51,9 +60,9 @@ export default defineConfig({
     port: 5173,
     host: "127.0.0.1",
     proxy: {
-      "/api": "http://127.0.0.1:3000",
-      "/connect": "http://127.0.0.1:3000",
-      "/oauth": "http://127.0.0.1:3000",
+      "/api": apiProxyOrigin,
+      "/connect": apiProxyOrigin,
+      "/oauth": apiProxyOrigin,
     },
   },
 });

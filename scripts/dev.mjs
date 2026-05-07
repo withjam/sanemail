@@ -1,10 +1,13 @@
 import { spawn } from "node:child_process";
 
+const apiPort = process.env.API_PORT || process.env.PORT || "3000";
+
 const env = {
   ...process.env,
-  PORT: process.env.PORT || "3000",
+  PORT: apiPort,
+  API_PORT: apiPort,
   HOST: process.env.HOST || "127.0.0.1",
-  APP_ORIGIN: process.env.APP_ORIGIN || "http://localhost:3000",
+  APP_ORIGIN: process.env.APP_ORIGIN || `http://localhost:${apiPort}`,
   WEB_ORIGIN: process.env.WEB_ORIGIN || "http://localhost:5173",
   PHOENIX_ENABLED: process.env.PHOENIX_ENABLED || "true",
   PHOENIX_PROJECT_NAME: process.env.PHOENIX_PROJECT_NAME || "Sanemail",

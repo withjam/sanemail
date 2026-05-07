@@ -150,7 +150,10 @@ export function runAiVerification() {
   });
 }
 
-export function getRecentClassifications(limit = 15) {
+/** Rows fetched for the AI Ops "recent classifications" panel (newest first). */
+export const AI_OPS_RECENT_CLASSIFICATIONS_LIMIT = 15;
+
+export function getRecentClassifications(limit = AI_OPS_RECENT_CLASSIFICATIONS_LIMIT) {
   return apiFetch<RecentClassificationsResponse>(
     `/api/ai/classifications/recent?limit=${encodeURIComponent(String(limit))}`,
   );

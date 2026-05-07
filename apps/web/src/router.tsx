@@ -42,6 +42,7 @@ import type {
   AiRun,
   AiVerificationRun,
   ClassificationBacklogSummary,
+  ClassificationExtractedMetadata,
   FeedbackKind,
   InboxBriefing,
   MailMessage,
@@ -52,6 +53,7 @@ import type {
   SyntheticIngestionResponse,
 } from "@togomail/shared/types";
 import {
+  AI_OPS_RECENT_CLASSIFICATIONS_LIMIT,
   classifyUnclassifiedMessages,
   disconnect,
   getAiControl,
@@ -687,7 +689,7 @@ function AiOpsRoute() {
   });
   const recentClassificationsQuery = useQuery({
     queryKey: queryKeys.recentClassifications,
-    queryFn: () => getRecentClassifications(15),
+    queryFn: () => getRecentClassifications(AI_OPS_RECENT_CLASSIFICATIONS_LIMIT),
   });
   const runMutation = useMutation({
     mutationFn: (options: { mode: AiRunMode; limit: number }) => runDailyBrief(options),
@@ -916,16 +918,23 @@ function AiOpsRoute() {
       <section className="surface flush" data-testid="ai-recent-classifications">
         <div className="section-header padded-header">
           <div>
-            <h2>Recent classifications</h2>
+            <h2>{AI_OPS_RECENT_CLASSIFICATIONS_LIMIT} most recent classifications</h2>
             <p>
               {recentClassificationsQuery.data
-                ? `Last ${recentClassificationsQuery.data.classifications.length} persisted classification rows across all runs.`
+                ? `${recentClassificationsQuery.data.classifications.length} shown · newest persisted rows across all runs (up to ${AI_OPS_RECENT_CLASSIFICATIONS_LIMIT}).`
                 : "Loading persisted classifications…"}
             </p>
           </div>
         </div>
         {recentClassificationsQuery.isError ? (
-          <EmptyState text="Could not load recent classifications." />
+          <>
+            <EmptyState text="Could not load recent classifications." />
+            <p className="ops-warn" data-testid="ai-recent-classifications-error">
+              {recentClassificationsQuery.error instanceof Error
+                ? recentClassificationsQuery.error.message
+                : String(recentClassificationsQuery.error)}
+            </p>
+          </>
         ) : recentClassificationsQuery.data && recentClassificationsQuery.data.classifications.length ? (
           <RecentClassificationsList items={recentClassificationsQuery.data.classifications} />
         ) : recentClassificationsQuery.isLoading ? (
@@ -1059,19 +1068,91 @@ function DecisionList({ run }: { run: AiRun }) {
   );
 }
 
+const EMPTY_CLASSIFICATION_EXTRACTED: ClassificationExtractedMetadata = {
+  actions: [],
+  deadlines: [],
+  entities: [],
+  replyCue: null,
+};
+
+function recentClassificationExtracted(item: RecentClassification): ClassificationExtractedMetadata {
+  return item.extracted ?? EMPTY_CLASSIFICATION_EXTRACTED;
+}
+
+function recentClassificationReasons(item: RecentClassification): string[] {
+  return Array.isArray(item.reasons) ? item.reasons : [];
+}
+
+function recentClassificationHasExpandableMetadata(item: RecentClassification) {
+  const extracted = recentClassificationExtracted(item);
+  const reasons = recentClassificationReasons(item);
+  return (
+    reasons.length > 0 ||
+    extracted.entities.length > 0 ||
+    extracted.actions.length > 0 ||
+    extracted.deadlines.length > 0 ||
+    Boolean(extracted.replyCue)
+  );
+}
+
+function ClassificationMetaChips({ label, values }: { label: string; values: string[] }) {
+  if (!values.length) return null;
+  return (
+    <div className="classification-meta-section">
+      <span className="classification-meta-label">{label}</span>
+      <div className="classification-meta-chips">
+        {values.map((v, i) => (
+          <span className="pill muted-pill" key={`${label}-${i}-${v}`}>
+            {v}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function RecentClassificationsList({ items }: { items: RecentClassification[] }) {
   return (
     <div className="decision-list">
-      {items.map((item) => (
+      {items.map((item) => {
+        const extracted = recentClassificationExtracted(item);
+        const reasons = recentClassificationReasons(item);
+        return (
         <div className="decision-row" key={item.id} data-testid="ai-recent-classification-row">
-          <div>
-            <div className="subject-line">{item.subject}</div>
-            <div className="snippet">
-              {senderName(item.from)}
-              {item.classifiedAt ? <> · {formatDate(item.classifiedAt)}</> : null}
-              {item.model ? <> · {item.model}</> : null}
+          <div className="decision-cell-main">
+            <div>
+              <div className="subject-line">{item.subject}</div>
+              <div className="snippet">
+                {senderName(item.from)}
+                {item.classifiedAt ? <> · {formatDate(item.classifiedAt)}</> : null}
+                {item.model ? <> · {item.model}</> : null}
+              </div>
+              {item.summary ? <div className="snippet">{item.summary}</div> : null}
             </div>
-            {item.summary ? <div className="snippet">{item.summary}</div> : null}
+            {recentClassificationHasExpandableMetadata(item) ? (
+              <details className="classification-meta" data-testid="ai-recent-classification-metadata">
+                <summary>Extracted metadata</summary>
+                <ClassificationMetaChips label="Entities" values={extracted.entities} />
+                <ClassificationMetaChips label="Actions" values={extracted.actions} />
+                <ClassificationMetaChips label="Deadlines" values={extracted.deadlines} />
+                {extracted.replyCue ? (
+                  <div className="classification-meta-section">
+                    <span className="classification-meta-label">Reply cue</span>
+                    <p className="classification-meta-replycue">{extracted.replyCue}</p>
+                  </div>
+                ) : null}
+                {reasons.length > 0 ? (
+                  <div className="classification-meta-section">
+                    <span className="classification-meta-label">Reasons</span>
+                    <ul className="classification-meta-reasons">
+                      {reasons.map((r, i) => (
+                        <li key={i}>{r}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </details>
+            ) : null}
           </div>
           <div className="row-meta">
             <span className={classForCategory(item.category)}>{item.category}</span>
@@ -1082,7 +1163,8 @@ function RecentClassificationsList({ items }: { items: RecentClassification[] })
             <span className="pill">conf {formatPercent(item.confidence)}</span>
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

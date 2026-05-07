@@ -747,14 +747,21 @@ async function handleRequest(request, response) {
   if (applyCors(request, response, config)) return;
 
   try {
-    if (request.method === "GET" && url.pathname === "/health") return routeHealth(response);
-    if (request.method === "GET" && url.pathname === "/ready") return routeReady(response);
+    if (request.method === "GET" && url.pathname === "/health") {
+      await routeHealth(response);
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/ready") {
+      await routeReady(response);
+      return;
+    }
     if (url.pathname === "/connect/gmail") {
       const principal = authenticateRequest(request, response);
       if (!principal) return;
       request.userId = principal.userId;
       await ensureUserRecord(principal.userId, principal.email);
-      return routeConnectGmail(principal.userId, response);
+      await routeConnectGmail(principal.userId, response);
+      return;
     }
     if (url.pathname === "/oauth/google/callback") {
       const ip = clientIpForRequest(request);
@@ -764,16 +771,20 @@ async function handleRequest(request, response) {
         sendJson(response, { error: "rate_limited" }, 429);
         return;
       }
-      return routeOAuthCallback(url, response);
+      await routeOAuthCallback(url, response);
+      return;
     }
-    if (url.pathname.startsWith("/api/")) return handleApi(url, request, response);
+    if (url.pathname.startsWith("/api/")) {
+      await handleApi(url, request, response);
+      return;
+    }
 
     if (!["GET", "HEAD"].includes(request.method)) {
       sendJson(response, { error: "unsupported_method" }, 405);
       return;
     }
 
-    return serveStatic(url, response);
+    await serveStatic(url, response);
   } catch (error) {
     if (error instanceof HttpError) {
       sendJson(response, { error: error.code, message: error.message }, error.status);

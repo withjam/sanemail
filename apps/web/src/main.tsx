@@ -11,10 +11,12 @@ import "./styles.css";
 
 const persister = createSyncStoragePersister({
   storage: window.localStorage,
-  key: "sanemail-query-cache-v2",
+  key: "sanemail-query-cache-v3",
 });
 
-registerSW({ immediate: true });
+if (import.meta.env.PROD) {
+  registerSW({ immediate: true });
+}
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
