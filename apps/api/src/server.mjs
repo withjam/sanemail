@@ -40,7 +40,7 @@ import {
   saveOAuthState,
   upsertAccount,
 } from "./store.mjs";
-import { getClassifiedMessages } from "./classifier.mjs";
+import { getClassifiedMessages, isSentByMailbox } from "./classifier.mjs";
 import { listQueueJobs } from "./queue.mjs";
 import { enqueueJob } from "./queue.mjs";
 import { resetDemoData } from "./demo-data.mjs";
@@ -96,13 +96,16 @@ function pickPrimaryAccount(store) {
 }
 
 function getMessageList(store, account) {
-  return getClassifiedMessages(store, account).sort(
-    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
-  );
+  return getClassifiedMessages(store, account)
+    .filter((message) => !isSentByMailbox(message, account))
+    .sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+    );
 }
 
 function getTodayMessages(store, account) {
   return getClassifiedMessages(store, account)
+    .filter((message) => !isSentByMailbox(message, account))
     .filter((message) => !message.sane.possibleJunk)
     .filter((message) => message.sane.category === "Today" || message.sane.needsReply)
     .sort((a, b) => b.sane.todayScore - a.sane.todayScore)

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyFeedbackToClassification, classifyMessage } from "../apps/api/src/classifier.mjs";
+import {
+  applyFeedbackToClassification,
+  classifyMessage,
+  computeSentByMailboxFlag,
+  isSentByMailbox,
+} from "../apps/api/src/classifier.mjs";
 
 const account = { email: "me@example.com" };
 
@@ -91,4 +96,40 @@ test("done feedback clears an item from needing attention", () => {
   assert.equal(result.needsReply, false);
   assert.equal(result.category, "All Mail");
   assert.equal(result.feedbackState.addressed, true);
+});
+
+test("computeSentByMailboxFlag is true for Gmail SENT label", () => {
+  assert.equal(
+    computeSentByMailboxFlag({
+      sourceLabels: ["SENT"],
+      fromHeader: "Other <x@y.com>",
+      mailboxEmail: "me@example.com",
+    }),
+    true,
+  );
+});
+
+test("computeSentByMailboxFlag matches From to connected mailbox", () => {
+  assert.equal(
+    computeSentByMailboxFlag({
+      sourceLabels: ["INBOX"],
+      fromHeader: "Me <me@example.com>",
+      mailboxEmail: "me@example.com",
+    }),
+    true,
+  );
+});
+
+test("isSentByMailbox infers from labels when sentByMailbox is unset", () => {
+  assert.equal(
+    isSentByMailbox(
+      {
+        sourceLabels: ["SENT"],
+        from: "x@y.com",
+        headers: { from: "x@y.com" },
+      },
+      { email: "me@example.com" },
+    ),
+    true,
+  );
 });

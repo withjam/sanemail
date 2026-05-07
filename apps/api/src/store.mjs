@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { normalizeClassificationExtracted } from "./classification-metadata.mjs";
+import { isSentByMailbox } from "./classifier.mjs";
 import { loadConfig } from "./config.mjs";
 import { decryptJson, encryptJson } from "./security.mjs";
 
@@ -113,6 +114,7 @@ function messageInputHash(message = {}) {
     snippet: message.snippet,
     bodyText: message.bodyText,
     labels: message.sourceLabels || [],
+    sentByMailbox: message.sentByMailbox === true,
   })).digest("hex");
 }
 
@@ -494,9 +496,11 @@ function nextAttemptMs(row) {
 }
 
 export function classificationBacklogSummaryFromStore(store, accountId) {
+  const account = (store.accounts || []).find((item) => item.id === accountId) || {};
+  const messageById = new Map((store.messages || []).map((message) => [message.id, message]));
   const rows = classificationRowsForStore(store, accountId);
   const counts = {
-    total: rows.length,
+    total: 0,
     pending: 0,
     stale: 0,
     failed: 0,
@@ -507,6 +511,9 @@ export function classificationBacklogSummaryFromStore(store, accountId) {
   let oldestPriorityAt = null;
 
   for (const row of rows) {
+    const linked = messageById.get(row.messageId);
+    if (linked && isSentByMailbox(linked, account)) continue;
+    counts.total += 1;
     const state = row.state || "pending";
     if (Object.prototype.hasOwnProperty.call(counts, state)) counts[state] += 1;
     if (backlogStates.has(state)) {
@@ -541,6 +548,7 @@ export function selectMessagesForClassificationBatch(store, account, limit) {
   return rows
     .map((row) => messageById.get(row.messageId))
     .filter(Boolean)
+    .filter((message) => !isSentByMailbox(message, account))
     .slice(0, limit || undefined);
 }
 

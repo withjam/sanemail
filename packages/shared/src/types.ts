@@ -177,6 +177,8 @@ export type MailMessage = {
   syncedAt?: string;
   createdAt?: string;
   updatedAt?: string;
+  /** True when the message was sent from the connected mailbox (e.g. Gmail SENT / From match). */
+  sentByMailbox?: boolean;
   sane: SaneClassification;
   feedback: Feedback[];
 };

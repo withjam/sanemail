@@ -169,6 +169,54 @@ const promptDefinitions = [
     userTemplate:
       "Summarize the status of my email inbox like you were my friendly, personal chief of staff.  Greet me with an executive summary of my current inbox. Tell me what I need to know, what requires my attention, what is likely upcoming in the near future, and remind me of anything I may have missed in the past. Give me conversational summaries, not numeric regurgitation or aggregations. Use this structured inbox context. Preserve messageId values exactly for linked callouts. Do not mention aggregate counts or system processing details.\n\nReturn JSON for the UI with this shape: {\"text\":\"brief conversational summary of the state of my inbox. Focus on today. Give me confidence in what you have planned. Don't aggregate numbers or counts, or summarize generalities.  Provide clear substance that sets the tone for what follows.\",\"narrative\":{\"status\":\"main paragraph\",\"needToKnow\":\"what are the most pressing items you've identified, summarize them for me here\",\"mightBeMissing\":\"summarize the items I may have forgotten, overlooked, neglected, or put off for later to make sure I don't miss them.\",\"needsAttention\":\"Summarize and callout the most urgent items that require my attention.  This can be a reply, a task, a deadline, or something time sensitive or urgent in its message\"},\"callouts\":[{\"kind\":\"attention|new_attention|carry_over\",\"label\":\"Needs attention\",\"title\":\"email subject without trailing punctuation\",\"body\":\"one short human reason this item matters\",\"messageId\":\"source message id\",\"messageIds\":[\"source message id\"],\"priority\":1,\"deliveredAt\":\"ISO timestamp\"}],\"counts\":{},\"messageIds\":[\"source message id\"]}. Keep callouts to 4 or fewer and use linked message ids when calling out specific emails.\n\n{{context}}",
   },
+  {
+    id: "mail-briefing-reconcile",
+    version: "2026-05-07.1",
+    stage: "briefing",
+    title: "Inbox briefing reconciliation",
+    description:
+      "Given a generated inbox briefing and recently sent mail, adjust the briefing to reflect items already addressed",
+    provider: "mock-local",
+    model: "deterministic-briefing-v0",
+    temperature: 0,
+    variables: ["briefing", "sentMail"],
+    responseSchema: {
+      text: "string",
+      narrative: {
+        status: "string",
+        needToKnow: "string",
+        mightBeMissing: "string",
+        needsAttention: "string",
+      },
+      callouts: [
+        {
+          kind: "attention | new_attention | carry_over",
+          label: "string",
+          title: "string",
+          body: "string",
+          messageId: "string",
+          messageIds: "string[]",
+          priority: "number",
+          deliveredAt: "string",
+        },
+      ],
+      counts: "object",
+      messageIds: "string[]",
+    },
+    system: [
+      "You are a personal chief of staff assisting with inbox prioritization.",
+      "You will be given (1) a generated inbox briefing JSON and (2) a list of recently sent mail from the same mailbox.",
+      "Your job is to reconcile: if the sent mail indicates the user already responded to or addressed a briefing callout, update the briefing to reflect that.",
+      "Be conservative: only mark items addressed when there is clear evidence (same thread, same subject, explicit recipient, or clear reply language).",
+      "If uncertain, keep the callout as-is.",
+      "Keep the output JSON shape exactly the same as the original briefing schema.",
+      "Preserve messageId values exactly; do not invent new ids.",
+      "Do not mention system/processing details.",
+      "Return compact JSON only.",
+    ].join(" "),
+    userTemplate:
+      "Reconcile this generated inbox briefing with the user's recently sent mail.\n\nGenerated briefing JSON:\n{{briefing}}\n\nRecently sent mail (most recent first):\n{{sentMail}}\n\nRules:\n- If a callout is already addressed by a sent message, remove it from callouts and adjust the narrative accordingly (you may mention it as already handled).\n- Do NOT remove callouts for unrelated sent mail.\n- Keep callouts to 4 or fewer.\n\nReturn the updated briefing JSON only.",
+  },
 ];
 
 function sortObject(value) {

@@ -38,6 +38,39 @@ const junkPatterns = [
 
 const addressedFeedbackKinds = new Set(["done", "not-important", "junk"]);
 
+function extractLowercasedEmails(value) {
+  return [...String(value || "").toLowerCase().matchAll(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi)].map(
+    (match) => match[0],
+  );
+}
+
+export function headerMailboxEmailMatches(header, mailboxEmail) {
+  const mailbox = String(mailboxEmail || "").toLowerCase().trim();
+  if (!mailbox) return false;
+  return extractLowercasedEmails(header).includes(mailbox);
+}
+
+/** Deterministic: Gmail SENT label and/or From matches the connected mailbox. */
+export function computeSentByMailboxFlag({
+  sourceLabels = [],
+  fromHeader = "",
+  mailboxEmail = "",
+} = {}) {
+  const labels = sourceLabels || [];
+  if (labels.includes("SENT")) return true;
+  return headerMailboxEmailMatches(fromHeader, mailboxEmail);
+}
+
+export function isSentByMailbox(message, account) {
+  if (message?.sentByMailbox === true) return true;
+  if (message?.sentByMailbox === false) return false;
+  return computeSentByMailboxFlag({
+    sourceLabels: message?.sourceLabels,
+    fromHeader: message?.from || message?.headers?.from,
+    mailboxEmail: account?.email,
+  });
+}
+
 function includesAny(value, patterns) {
   const lower = String(value || "").toLowerCase();
   return patterns.some((pattern) => lower.includes(pattern));

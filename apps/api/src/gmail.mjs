@@ -1,3 +1,5 @@
+import { computeSentByMailboxFlag } from "./classifier.mjs";
+
 const gmailBaseUrl = "https://gmail.googleapis.com/gmail/v1/users/me";
 
 function base64UrlDecode(value = "") {
@@ -180,6 +182,7 @@ export function normalizeGmailMessage(account, gmailMessage) {
   const parts = collectParts(gmailMessage.payload);
   const bodyText = normalizeText(parts.plain.join("\n\n") || parts.html.join("\n\n"));
   const date = normalizeDate(headers, gmailMessage);
+  const labelIds = gmailMessage.labelIds || [];
 
   return {
     id: `${account.id}:message:${gmailMessage.id}`,
@@ -187,7 +190,12 @@ export function normalizeGmailMessage(account, gmailMessage) {
     provider: "gmail",
     providerMessageId: gmailMessage.id,
     providerThreadId: gmailMessage.threadId,
-    sourceLabels: gmailMessage.labelIds || [],
+    sourceLabels: labelIds,
+    sentByMailbox: computeSentByMailboxFlag({
+      sourceLabels: labelIds,
+      fromHeader: headers.from || "",
+      mailboxEmail: account.email,
+    }),
     historyId: gmailMessage.historyId,
     internalDate: gmailMessage.internalDate,
     subject: headers.subject || "(no subject)",

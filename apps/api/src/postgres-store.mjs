@@ -290,6 +290,7 @@ function messageInputHash(message = {}) {
     snippet: message.snippet,
     bodyText: message.bodyText,
     labels: message.sourceLabels || [],
+    sentByMailbox: message.sentByMailbox === true,
   });
 }
 
@@ -416,6 +417,9 @@ function messageFromRow(row) {
     syncedAt: metadata.syncedAt || row.ingested_at?.toISOString?.() || row.ingested_at,
     createdAt: row.created_at?.toISOString?.() || row.created_at,
     updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
+    ...(metadata.sentByMailbox === true || metadata.sentByMailbox === false
+      ? { sentByMailbox: metadata.sentByMailbox === true }
+      : {}),
   };
 }
 
@@ -530,6 +534,7 @@ export async function upsertSyncedMessages(account, messages = []) {
             to: message.to || "",
             cc: message.cc || "",
             syncedAt: message.syncedAt || nowIso(),
+            sentByMailbox: message.sentByMailbox === true,
           }),
         ],
       );

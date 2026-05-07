@@ -1,6 +1,10 @@
 import crypto from "node:crypto";
 import { loadConfig } from "../config.mjs";
-import { applyFeedbackToClassification, classifyMessage } from "../classifier.mjs";
+import {
+  applyFeedbackToClassification,
+  classifyMessage,
+  isSentByMailbox,
+} from "../classifier.mjs";
 import {
   getPrimarySourceConnection,
   latestInboxBriefing,
@@ -11,6 +15,21 @@ import {
 import { classifyWithOllama, generateBriefingWithOllama } from "./ollama.mjs";
 import { traceAiRun } from "./phoenix.mjs";
 import { getPromptSnapshots, hashValue, renderPrompt } from "./prompts.mjs";
+
+function sentMailContextForReconciliation(store, account, limit = 20) {
+  return [...(store.messages || [])]
+    .filter((message) => !account?.id || message.accountId === account.id)
+    .filter((message) => isSentByMailbox(message, account))
+    .sort((a, b) => messageDeliveredAtMs(b) - messageDeliveredAtMs(a))
+    .slice(0, limit)
+    .map((message) => ({
+      messageId: message.id,
+      deliveredAt: message.date || null,
+      subject: message.subject || "",
+      to: message.to || message.headers?.to || "",
+      snippet: message.snippet || "",
+    }));
+}
 
 const actionPatterns = [
   ["review", "review"],
@@ -1191,13 +1210,73 @@ async function runOllamaDailyBriefCall({ run, config, prompt, fallback }) {
   }
 }
 
+async function runOllamaBriefReconcileCall({ run, config, prompt, fallback }) {
+  const started = Date.now();
+  const inputHash = promptInputHash(prompt);
+  try {
+    const result = await generateBriefingWithOllama({
+      config,
+      prompt,
+      fallback,
+    });
+    const status = result.meta.fallback ? "fallback" : "succeeded";
+    recordLlmCall(run, {
+      pipeline: "daily_brief",
+      stage: "brief_reconcile",
+      provider: "ollama",
+      status,
+      model: result.meta.model || config.ollama.model,
+      requestedModel: config.ollama.model,
+      promptId: prompt.id,
+      promptVersion: prompt.version,
+      promptHash: prompt.hash,
+      contractHash: prompt.contractHash,
+      inputHash,
+      outputHash: outputHash(result.briefing),
+      inputMessageCount: 0,
+      outputMessageCount: result.briefing?.messageIds?.length || 0,
+      attempts: result.meta.attempts,
+      latencyMs: result.meta.latencyMs,
+      promptEvalCount: result.meta.promptEvalCount,
+      evalCount: result.meta.evalCount,
+      thinkingChars: result.meta.thinkingChars,
+      fallback: Boolean(result.meta.fallback),
+      fallbackReason: result.meta.fallbackReason || null,
+    });
+    return result;
+  } catch (error) {
+    recordLlmCall(run, {
+      pipeline: "daily_brief",
+      stage: "brief_reconcile",
+      provider: "ollama",
+      status: "failed",
+      model: config.ollama.model,
+      requestedModel: config.ollama.model,
+      promptId: prompt.id,
+      promptVersion: prompt.version,
+      promptHash: prompt.hash,
+      contractHash: prompt.contractHash,
+      inputHash,
+      inputMessageCount: 0,
+      outputMessageCount: 0,
+      attempts: Math.max(1, Number(config.ai.maxRetries || 0) + 1),
+      latencyMs: Date.now() - started,
+      promptEvalCount: 0,
+      evalCount: 0,
+      thinkingChars: 0,
+      error: publicError(error),
+    });
+    throw error;
+  }
+}
+
 async function applyOllamaProvider(
   run,
   scopedMessages,
   config,
   previousBriefing = null,
   memory = null,
-  { briefingOnly = false, generateBriefing = true } = {},
+  { briefingOnly = false, generateBriefing = true, sentMail = [] } = {},
 ) {
   const started = Date.now();
   const fallbackById = new Map(run.output.decisions.map((decision) => [decision.messageId, decision]));
@@ -1341,6 +1420,32 @@ async function applyOllamaProvider(
         calloutCount: result.briefing.callouts?.length || 0,
       }),
     );
+
+    if (sentMail.length) {
+      const reconcileStart = Date.now();
+      const reconcilePrompt = renderPrompt("mail-briefing-reconcile", {
+        briefing: run.output.briefing,
+        sentMail,
+      });
+      const reconcile = await runOllamaBriefReconcileCall({
+        run,
+        config,
+        prompt: reconcilePrompt,
+        fallback: run.output.briefing,
+      });
+      run.output.briefing = reconcile.briefing;
+      run.spans.push(
+        createSpan("model.ollama_briefing_reconcile", reconcileStart, {
+          pipeline: "daily_brief",
+          status: reconcile.meta.fallback ? "degraded" : "ok",
+          model: reconcile.meta.model,
+          attempts: reconcile.meta.attempts,
+          fallback: Boolean(reconcile.meta.fallback),
+          fallbackReason: reconcile.meta.fallbackReason || null,
+          calloutCount: reconcile.briefing.callouts?.length || 0,
+        }),
+      );
+    }
   }
   run.provider = {
     name: "ollama",
@@ -1410,6 +1515,7 @@ export async function runAiLoop({
   const effectiveLimit = boundedMessageLimit(limit, config);
   const allMessages = [...(store.messages || [])]
     .filter((message) => !account?.id || message.accountId === account.id)
+    .filter((message) => !isSentByMailbox(message, account))
     .sort((a, b) => messageDeliveredAtMs(b) - messageDeliveredAtMs(a));
   const feedbackByMessage = new Map();
   for (const entry of store.feedback || []) {
@@ -1450,6 +1556,7 @@ export async function runAiLoop({
       });
   const messages = selection.selected;
   const contextBriefing = selection.mode === "iterative" ? previousBriefing : null;
+  const sentMail = generateBriefing ? sentMailContextForReconciliation(store, account, 20) : [];
   aiDebugLog("ollama run", {
     effectiveLimit,
     briefingFlow: selection.mode,
@@ -1494,6 +1601,16 @@ export async function runAiLoop({
       temperature: config.ollama.temperature,
       think: config.ollama.think,
     },
+    ...(generateBriefing
+      ? {
+          "mail-briefing-reconcile": {
+            provider: "ollama",
+            model: config.ollama.model,
+            temperature: config.ollama.temperature,
+            think: config.ollama.think,
+          },
+        }
+      : {}),
   });
   console.log("[ai run] starting", {
     trigger,
@@ -1518,6 +1635,7 @@ export async function runAiLoop({
   await applyOllamaProvider(run, messages, config, contextBriefing, run.output.briefing?.memory, {
     briefingOnly,
     generateBriefing,
+    sentMail,
   });
   console.log("[ai run] finished", {
     runId: run.id,
