@@ -24,10 +24,10 @@ const config = {
 };
 
 const prompt = {
-  id: "mail-briefing",
+  id: "mail-briefing-structurize",
   version: "test",
   system: "Return JSON.",
-  user: "Summarize the inbox.",
+  user: "Convert prose to briefing JSON.",
 };
 
 const fallbackBriefing = {
@@ -56,10 +56,13 @@ const fallbackDecision = {
   recsysScore: 70,
   suppressFromToday: false,
   reasons: ["sent directly to you"],
+  wordCount: 12,
   extracted: {
     actions: ["review"],
     deadlines: [],
     entities: [],
+    completions: [],
+    replyCue: null,
   },
 };
 

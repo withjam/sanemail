@@ -26,7 +26,7 @@ const promptDefinitions = [
   },
   {
     id: "mail-extract",
-    version: "2026-05-02.1",
+    version: "2026-05-07.1",
     stage: "extraction",
     title: "Action and context extraction",
     description: "Extract actions, dates, entities, and reply cues from one email.",
@@ -39,9 +39,10 @@ const promptDefinitions = [
       deadlines: "string[]",
       entities: "string[]",
       replyCue: "string | null",
+      completions: [{ phrase: "string", occurredAt: "string (ISO 8601)" }],
     },
     system:
-      "Extract only useful operational context from personal email. Do not invent facts. Return short normalized fields that can support ranking and reminders.",
+      "Extract only useful operational context from personal email. Do not invent facts. Return short normalized fields that can support ranking and reminders. For emails that state something already happened (e.g. payment posted, package delivered, flight landed, subscription cancelled), include completions with phrase plus occurredAt; use the message received time if the body does not give a specific time.",
     userTemplate:
       "Subject: {{subject}}\nFrom: {{from}}\nSnippet: {{snippet}}\nBody: {{bodyText}}",
   },
@@ -67,7 +68,7 @@ const promptDefinitions = [
   },
   {
     id: "mail-message-classification",
-    version: "2026-05-07.1",
+    version: "2026-05-07.2",
     stage: "classification",
     title: "Single message classification",
     description:
@@ -89,6 +90,7 @@ const promptDefinitions = [
       summary: "string | null",
       actionKinds: "string[]",
       deadlines: "string[]",
+      completions: [{ phrase: "string", occurredAt: "string (ISO 8601)" }],
       entityKeys: "string[]",
       messageTypes: [
         {
@@ -116,20 +118,22 @@ const promptDefinitions = [
       "Suggest candidate types only when the evidence is specific and reusable.",
       "Be conservative about junk, scams, and security alerts.",
       "When the message body has more than 50 words, write a single neutral sentence (under 30 words) capturing what the message is about. Otherwise return null for summary.",
+      "When the email reports a completed or finalized event (e.g. check cleared, payment posted, refund processed, package delivered, flight landed, service cancelled), include a completions array: each item has phrase and occurredAt (ISO 8601). If no explicit event time is in the body, use the message Date.",
       "Return compact JSON only.",
     ].join(" "),
     userTemplate:
       "Policy:\n{{policy}}\n\nUser taxonomy:\n{{taxonomy}}\n\nUser signals:\n{{userSignals}}\n\nMessage:\n{{message}}",
   },
   {
-    id: "mail-briefing",
-    version: "2026-05-05.1",
+    id: "mail-briefing-prose",
+    version: "2026-05-08.1",
     stage: "briefing",
-    title: "Inbox state briefing",
-    description: "Summarize the status of my email inbox like you were my personal chief of staff",
+    title: "Inbox briefing (prose)",
+    description:
+      "Draft a natural-language inbox briefing; JSON is produced in a separate structurize step.",
     provider: "mock-local",
     model: "deterministic-briefing-v0",
-    temperature: 0,
+    temperature: 0.35,
     variables: [
       "recent",
       "last7Days",
@@ -141,45 +145,44 @@ const promptDefinitions = [
       "hidden",
       "context",
     ],
-    responseSchema: {
-      text: "string",
-      narrative: {
-        status: "string",
-        needToKnow: "string",
-        mightBeMissing: "string",
-        needsAttention: "string",
-      },
-      callouts: [
-        {
-          kind: "attention | new_attention | carry_over",
-          label: "string",
-          title: "string",
-          body: "string",
-          messageId: "string",
-          messageIds: "string[]",
-          priority: "number",
-          deliveredAt: "string",
-        },
-      ],
-      counts: "object",
-      messageIds: "string[]",
-    },
+    responseSchema: { prose: "string" },
     system:
-      "You are a personal chief of staff responsible for reviewing email messages and summarizing them in succinct, friendly, yet topical summaries.  Prefer action and insights to fluff and filler so that your boss can attack their day with confidence.",
+      "You are a personal chief of staff reviewing email. Write in warm, direct prose. Prefer action and clarity over filler. Do not output JSON or markdown code fences. Do not quote aggregate counts from the context.",
     userTemplate:
-      "Summarize the status of my email inbox like you were my friendly, personal chief of staff.  Greet me with an executive summary of my current inbox. Tell me what I need to know, what requires my attention, what is likely upcoming in the near future, and remind me of anything I may have missed in the past. Give me conversational summaries, not numeric regurgitation or aggregations. Use this structured inbox context. Preserve messageId values exactly for linked callouts. Do not mention aggregate counts or system processing details.\n\nReturn JSON for the UI with this shape: {\"text\":\"brief conversational summary of the state of my inbox. Focus on today. Give me confidence in what you have planned. Don't aggregate numbers or counts, or summarize generalities.  Provide clear substance that sets the tone for what follows.\",\"narrative\":{\"status\":\"main paragraph\",\"needToKnow\":\"what are the most pressing items you've identified, summarize them for me here\",\"mightBeMissing\":\"summarize the items I may have forgotten, overlooked, neglected, or put off for later to make sure I don't miss them.\",\"needsAttention\":\"Summarize and callout the most urgent items that require my attention.  This can be a reply, a task, a deadline, or something time sensitive or urgent in its message\"},\"callouts\":[{\"kind\":\"attention|new_attention|carry_over\",\"label\":\"Needs attention\",\"title\":\"email subject without trailing punctuation\",\"body\":\"one short human reason this item matters\",\"messageId\":\"source message id\",\"messageIds\":[\"source message id\"],\"priority\":1,\"deliveredAt\":\"ISO timestamp\"}],\"counts\":{},\"messageIds\":[\"source message id\"]}. Keep callouts to 4 or fewer and use linked message ids when calling out specific emails.\n\n{{context}}",
+      "Draft my inbox briefing in plain text.\n\nCover: where things stand overall; what I need to know first; what might need a reply or decision soon; anything I may be neglecting; what is upcoming.\n\nUse this structured context (including message ids in candidate callouts):\n{{context}}\n\nWhen you refer to a specific message, include its id on the same line using exactly this form: [messageId:THE_ID] so downstream tools can link it.\n\nWrite readable paragraphs or short sections with clear headings in plain text (no JSON).",
   },
   {
     id: "mail-briefing-reconcile",
-    version: "2026-05-07.1",
+    version: "2026-05-08.1",
     stage: "briefing",
-    title: "Inbox briefing reconciliation",
+    title: "Inbox briefing reconciliation (prose)",
     description:
-      "Given a generated inbox briefing and recently sent mail, adjust the briefing to reflect items already addressed",
+      "Adjust a prose inbox briefing using recently sent mail; still plain text until structurize.",
+    provider: "mock-local",
+    model: "deterministic-briefing-v0",
+    temperature: 0.35,
+    variables: ["briefing", "sentMail"],
+    responseSchema: { prose: "string" },
+    system: [
+      "You help reconcile an inbox briefing with recently sent mail from the same mailbox.",
+      "You receive a prose briefing and a list of sent messages. If sent mail clearly shows the user already handled something mentioned in the briefing, update the prose: you may remove or soften that item and briefly note it is already addressed.",
+      "Be conservative; if evidence is weak, leave the briefing unchanged.",
+      "Preserve any [messageId:...] tags when those messages are still relevant.",
+      "Output plain text only — no JSON, no code fences.",
+    ].join(" "),
+    userTemplate:
+      "Prose briefing draft:\n{{briefing}}\n\nRecently sent mail from this mailbox (most recent first):\n{{sentMail}}\n\nReturn the full revised prose briefing only.",
+  },
+  {
+    id: "mail-briefing-structurize",
+    version: "2026-05-08.1",
+    stage: "briefing",
+    title: "Inbox briefing structurize",
+    description: "Convert final prose + anchors into UI JSON (temperature 0 at inference).",
     provider: "mock-local",
     model: "deterministic-briefing-v0",
     temperature: 0,
-    variables: ["briefing", "sentMail"],
+    variables: ["prose", "anchors"],
     responseSchema: {
       text: "string",
       narrative: {
@@ -204,18 +207,14 @@ const promptDefinitions = [
       messageIds: "string[]",
     },
     system: [
-      "You are a personal chief of staff assisting with inbox prioritization.",
-      "You will be given (1) a generated inbox briefing JSON and (2) a list of recently sent mail from the same mailbox.",
-      "Your job is to reconcile: if the sent mail indicates the user already responded to or addressed a briefing callout, update the briefing to reflect that.",
-      "Be conservative: only mark items addressed when there is clear evidence (same thread, same subject, explicit recipient, or clear reply language).",
-      "If uncertain, keep the callout as-is.",
-      "Keep the output JSON shape exactly the same as the original briefing schema.",
-      "Preserve messageId values exactly; do not invent new ids.",
-      "Do not mention system/processing details.",
-      "Return compact JSON only.",
+      "You convert a chief-of-staff prose inbox briefing into compact JSON for a web UI.",
+      "Use ONLY the provided anchors for counts, messageIds, and messageId values in callouts. Do not invent message ids.",
+      "Choose at most 4 callouts; pick the ones best supported by the prose.",
+      "Map prose into text (short executive summary) plus narrative.status, needToKnow, mightBeMissing, needsAttention.",
+      "Return JSON only, matching the schema described in the user message.",
     ].join(" "),
     userTemplate:
-      "Reconcile this generated inbox briefing with the user's recently sent mail.\n\nGenerated briefing JSON:\n{{briefing}}\n\nRecently sent mail (most recent first):\n{{sentMail}}\n\nRules:\n- If a callout is already addressed by a sent message, remove it from callouts and adjust the narrative accordingly (you may mention it as already handled).\n- Do NOT remove callouts for unrelated sent mail.\n- Keep callouts to 4 or fewer.\n\nReturn the updated briefing JSON only.",
+      "Prose briefing:\n{{prose}}\n\nAnchors (copy counts and messageIds exactly; callouts must use only these messageIds):\n{{anchors}}\n\nReturn JSON: {\"text\":string,\"narrative\":{\"status\":string,\"needToKnow\":string,\"mightBeMissing\":string,\"needsAttention\":string},\"callouts\":[...],\"counts\":object,\"messageIds\":string[]}. callouts items: kind (attention|new_attention|carry_over), label, title, body, messageId, messageIds, priority, deliveredAt.",
   },
 ];
 

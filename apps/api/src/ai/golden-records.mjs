@@ -7,7 +7,7 @@ const goldenRecords = [
   {
     id: "golden-day-summary-v1",
     featureSetId: GOLDEN_FEATURE_SET_ID,
-    promptIds: ["mail-briefing"],
+    promptIds: ["mail-briefing-prose", "mail-briefing-structurize"],
     title: "Summarize the day",
     description:
       "Aggregate the synthetic mailbox into the homepage briefing paragraph.",
@@ -122,7 +122,7 @@ const goldenRecords = [
   {
     id: "golden-day-summary-carryover-v1",
     featureSetId: GOLDEN_FEATURE_SET_ID,
-    promptIds: ["mail-briefing"],
+    promptIds: ["mail-briefing-prose", "mail-briefing-structurize"],
     title: "Summarize the day with prior context",
     description:
       "Aggregate the synthetic mailbox while carrying still-relevant reminders from the previous briefing.",

@@ -307,7 +307,50 @@ function normalizeSummary(value, wordCount) {
   return trimmed.length > 400 ? `${trimmed.slice(0, 397)}...` : trimmed;
 }
 
-function normalizeDecision(payload, fallback) {
+function normalizeDeliveredAtIso(value) {
+  const t = new Date(value || 0).getTime();
+  return Number.isFinite(t) ? new Date(t).toISOString() : new Date().toISOString();
+}
+
+function completionEventsFromPayload(payload, deliveredAtIso) {
+  const defaultAt = normalizeDeliveredAtIso(deliveredAtIso);
+  const raw =
+    payload.completions ||
+    payload.extracted?.completions ||
+    payload.completedEvents ||
+    payload.completed ||
+    [];
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const item of raw) {
+    if (typeof item === "string") {
+      const phrase = item.trim();
+      if (phrase) out.push({ phrase, occurredAt: defaultAt });
+      continue;
+    }
+    if (!item || typeof item !== "object") continue;
+    const phrase = String(item.phrase || item.summary || item.label || "").trim();
+    if (!phrase) continue;
+    let occurredAt = String(item.occurredAt || item.at || "").trim();
+    let t = new Date(occurredAt || defaultAt).getTime();
+    if (!Number.isFinite(t)) t = new Date(defaultAt).getTime();
+    out.push({ phrase, occurredAt: new Date(t).toISOString() });
+  }
+  return out.slice(0, 8);
+}
+
+function mergeCompletionEvents(deterministic, model) {
+  const map = new Map();
+  for (const c of deterministic) {
+    if (c?.phrase) map.set(String(c.phrase).toLowerCase(), c);
+  }
+  for (const c of model) {
+    if (c?.phrase) map.set(String(c.phrase).toLowerCase(), c);
+  }
+  return Array.from(map.values()).slice(0, 8);
+}
+
+function normalizeDecision(payload, fallback, deliveredAtIso) {
   const category = normalizeCategory(payload.category, fallback.category);
   const possibleJunk =
     typeof payload.possibleJunk === "boolean" ? payload.possibleJunk : fallback.possibleJunk;
@@ -318,6 +361,11 @@ function normalizeDecision(payload, fallback) {
   const deadlines = stringArray(payload.deadlines || payload.extracted?.deadlines);
   const entities = stringArray(payload.entities || payload.extracted?.entities);
   const summary = normalizeSummary(payload.summary, fallback.wordCount);
+  const deterministicCompletions = fallback.extracted?.completions || [];
+  const completions = mergeCompletionEvents(
+    deterministicCompletions,
+    completionEventsFromPayload(payload, deliveredAtIso),
+  );
 
   return {
     category,
@@ -336,6 +384,7 @@ function normalizeDecision(payload, fallback) {
       actions: actions.length ? actions : fallback.extracted.actions,
       deadlines: deadlines.length ? deadlines : fallback.extracted.deadlines,
       entities: entities.length ? entities : fallback.extracted.entities,
+      completions,
       replyCue: needsReply ? "reply-likely" : null,
     },
   };
@@ -493,6 +542,39 @@ function chatOptions(config, attempt, { numPredict, think = config.ollama.think,
   };
 }
 
+/** Creative prose (brief + reconcile): OLLAMA_TEMPERATURE; retries force temp 0. */
+function chatOptionsBriefingProse(config, attempt, { numPredict = 1200 } = {}) {
+  const jsonRecovery = attempt > 0;
+  const temperature = jsonRecovery ? 0 : Number(config.ollama.temperature ?? 0);
+  return {
+    think: jsonRecovery ? false : config.ollama.think,
+    options: {
+      temperature,
+      ...(numPredict ? { num_predict: numPredict } : {}),
+    },
+    jsonRecovery,
+  };
+}
+
+/** Final JSON structurize: always deterministic (temperature 0, no extended thinking). */
+function chatOptionsBriefingStructurize(config, attempt, { numPredict = 900 } = {}) {
+  return {
+    think: false,
+    options: {
+      temperature: 0,
+      ...(numPredict ? { num_predict: numPredict } : {}),
+    },
+    jsonRecovery: attempt > 0,
+  };
+}
+
+function normalizeBriefingProseContent(raw) {
+  let text = String(raw || "").trim();
+  const fenced = text.match(/^```(?:\w+)?\s*([\s\S]*?)\s*```$/);
+  if (fenced) text = fenced[1].trim();
+  return text;
+}
+
 function fallbackBriefingForJsonError(fallback) {
   const generatedAt = new Date().toISOString();
   return {
@@ -507,6 +589,11 @@ function fallbackBriefingForJsonError(fallback) {
     source: "ai-loop-fallback",
     model: fallback.model || "deterministic-briefing-v0",
   };
+}
+
+/** Exported for Phoenix tracing when PHOENIX_ALLOW_SENSITIVE_CONTENT is set. */
+export function buildClassificationMessages(message, fallback) {
+  return buildMessages(message, fallback);
 }
 
 function buildMessages(message, fallback) {
@@ -549,7 +636,7 @@ function buildMessages(message, fallback) {
         "Allowed categories: Today, Needs Reply, FYI, Junk Review, All Mail.",
         "Be conservative about scam and junk detection.",
         summaryClause,
-        "Schema: {\"category\":string,\"needsReply\":boolean,\"possibleJunk\":boolean,\"automated\":boolean,\"confidence\":number,\"recsysScore\":number,\"suppressFromToday\":boolean,\"reasons\":string[],\"summary\":string|null,\"actions\":string[],\"deadlines\":string[],\"entities\":string[]}",
+        "Schema: {\"category\":string,\"needsReply\":boolean,\"possibleJunk\":boolean,\"automated\":boolean,\"confidence\":number,\"recsysScore\":number,\"suppressFromToday\":boolean,\"reasons\":string[],\"summary\":string|null,\"actions\":string[],\"deadlines\":string[],\"entities\":string[],\"completions\":[{\"phrase\":string,\"occurredAt\":string}]}",
       ].join(" "),
     },
     {
@@ -633,7 +720,7 @@ export async function classifyWithOllama({ config, message, fallback, clientFact
       const parsed = parseJsonContent(payload.message?.content || payload.response, {
         expectedKeys: ["category", "needsReply", "recsysScore"],
       });
-      const decision = normalizeDecision(parsed, fallback);
+      const decision = normalizeDecision(parsed, fallback, message.date);
       const thinking = payload.message?.thinking || payload.thinking || "";
 
       return {
@@ -681,6 +768,89 @@ export async function classifyWithOllama({ config, message, fallback, clientFact
   throw normalizeFinalError(lastError, "classification", config);
 }
 
+export async function generateBriefingProseWithOllama({
+  config,
+  prompt,
+  proseFallback = "",
+  clientFactory = createClient,
+  sleepFn = sleep,
+}) {
+  const started = Date.now();
+  let lastError;
+  let attempts = 0;
+  const url = chatUrl(config.ollama.host);
+  const retryLimit = maxRetries(config);
+
+  for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
+    attempts = attempt + 1;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), config.ai.timeoutMs);
+    const client = clientFactory(config, controller.signal);
+    const generated = chatOptionsBriefingProse(config, attempt, { numPredict: 1200 });
+    const body = {
+      model: config.ollama.model,
+      stream: false,
+      think: generated.think,
+      options: generated.options,
+      messages: [
+        { role: "system", content: prompt.system },
+        { role: "user", content: prompt.user },
+      ],
+    };
+
+    try {
+      const payload = await client.chat(body);
+      const text = normalizeBriefingProseContent(payload.message?.content || payload.response);
+      if (!text) throw contentPreviewError(new Error("Ollama returned an empty prose briefing."), "", {
+        code: "OLLAMA_MALFORMED_JSON",
+        retryable: true,
+      });
+      const thinking = payload.message?.thinking || payload.thinking || "";
+      return {
+        text,
+        meta: {
+          latencyMs: Date.now() - started,
+          model: payload.model || config.ollama.model,
+          thinkingChars: thinking.length,
+          promptEvalCount: payload.prompt_eval_count || 0,
+          evalCount: payload.eval_count || 0,
+          totalDurationNs: payload.total_duration || 0,
+          attempts: attempt + 1,
+        },
+      };
+    } catch (error) {
+      lastError = error;
+      const status = statusFromError(error);
+      if (attempt >= retryLimit || !isRetryableError(error)) break;
+      await sleepFn(retryDelayMs(error, attempt));
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  console.warn("[ollama briefing prose fallback]", {
+    attempts,
+    requestModel: config.ollama.model,
+    responsePreview: responsePreview(lastError),
+  });
+  return {
+    text: proseFallback || "Brief unavailable.",
+    meta: {
+      latencyMs: Date.now() - started,
+      model: config.ollama.model,
+      thinkingChars: 0,
+      promptEvalCount: 0,
+      evalCount: 0,
+      totalDurationNs: 0,
+      attempts,
+      fallback: true,
+      fallbackReason: "prose_error",
+      error: lastError ? errorMessage(lastError) : null,
+    },
+  };
+}
+
+/** Final step: prose + anchors → UI JSON. Always uses JSON mode and temperature 0. */
 export async function generateBriefingWithOllama({
   config,
   prompt,
@@ -699,7 +869,7 @@ export async function generateBriefingWithOllama({
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), config.ai.timeoutMs);
     const client = clientFactory(config, controller.signal);
-    const generated = chatOptions(config, attempt, { numPredict: 900 });
+    const generated = chatOptionsBriefingStructurize(config, attempt, { numPredict: 900 });
     const body = {
       model: config.ollama.model,
       stream: false,
@@ -719,7 +889,7 @@ export async function generateBriefingWithOllama({
     };
 
     try {
-      console.log("[ollama briefing request]", {
+      console.log("[ollama briefing structurize request]", {
         url,
         attempt: attempt + 1,
         requestModel: body.model,
@@ -727,7 +897,7 @@ export async function generateBriefingWithOllama({
         temperature: body.options.temperature,
         promptUserChars: prompt.user.length,
       });
-      debugLog("briefing request", {
+      debugLog("briefing structurize request", {
         url,
         clientHost: clientHost(config.ollama.host),
         client: "official ollama-js",
@@ -741,7 +911,7 @@ export async function generateBriefingWithOllama({
         apiKey: config.ollama.apiKey ? "set (redacted)" : "unset",
       });
       const payload = await client.chat(body);
-      console.log("[ollama briefing response]", {
+      console.log("[ollama briefing structurize response]", {
         url,
         attempt: attempt + 1,
         latencyMs: Date.now() - started,
@@ -751,7 +921,7 @@ export async function generateBriefingWithOllama({
         promptEvalCount: payload.prompt_eval_count || 0,
         evalCount: payload.eval_count || 0,
       });
-      debugLog("briefing response", {
+      debugLog("briefing structurize response", {
         url,
         status: 200,
         ok: true,
@@ -780,7 +950,7 @@ export async function generateBriefingWithOllama({
     } catch (error) {
       lastError = error;
       const status = statusFromError(error);
-      debugLog("briefing response", {
+      debugLog("briefing structurize response", {
         url,
         status: status || "unknown",
         ok: false,
@@ -792,7 +962,7 @@ export async function generateBriefingWithOllama({
       });
       if (attempt >= retryLimit || !isRetryableError(error)) break;
       const delayMs = retryDelayMs(error, attempt);
-      debugLog("briefing retry", {
+      debugLog("briefing structurize retry", {
         status,
         attempt: attempt + 1,
         nextAttempt: attempt + 2,
@@ -807,13 +977,13 @@ export async function generateBriefingWithOllama({
   }
 
   if (isJsonContentError(lastError)) {
-    console.warn("[ollama briefing fallback]", {
+    console.warn("[ollama briefing structurize fallback]", {
       reason: "malformed_json",
       attempts,
       requestModel: config.ollama.model,
       responsePreview: responsePreview(lastError),
     });
-    debugLog("briefing fallback", {
+    debugLog("briefing structurize fallback", {
       reason: "malformed_json",
       attempts,
       promptId: prompt.id,

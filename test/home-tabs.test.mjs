@@ -39,7 +39,7 @@ test("home tabs expose distinct categorized demo mailbox slices", () => {
   assert.equal(tabs.upcoming.every((message) => !message.sane.needsReply), true);
   assert.equal(tabs.upcoming.every((message) => !message.sane.possibleJunk), true);
 
-  assert.equal(tabs.mostRecent[0].subject, "Roadmap notes from this morning");
+  assert.equal(tabs.mostRecent[0].subject, "Your monthly bank statement is ready");
   assert.equal(tabs.needsReply[0].subject, "Can you review the lease renewal today?");
   assert.equal(tabs.upcoming[0].subject, "Flight check-in opens tomorrow");
 });

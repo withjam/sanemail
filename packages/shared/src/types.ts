@@ -250,6 +250,7 @@ export type HomeResponse = {
     mostRecent: MailMessage[];
     needsReply: MailMessage[];
     upcoming: MailMessage[];
+    completed: MailMessage[];
   };
 };
 
@@ -355,11 +356,18 @@ export type AiEvalRecord = {
 };
 
 /** Persisted as message_classifications.action_metadata (from AiDecision.extracted). */
+export type ClassificationCompletionEvent = {
+  phrase: string;
+  /** When the completed event occurred (often the message received time if not explicit in body). */
+  occurredAt: string;
+};
+
 export type ClassificationExtractedMetadata = {
   actions: string[];
   deadlines: string[];
   entities: string[];
   replyCue: string | null;
+  completions: ClassificationCompletionEvent[];
 };
 
 export type AiDecision = {
@@ -498,6 +506,7 @@ export type AiRun = {
     briefingModel?: string;
     classificationModel?: string;
     temperature: number;
+    briefingStructTemperature?: number;
     think?: string | boolean;
     host?: string;
     classifyMessages?: boolean;
@@ -556,6 +565,8 @@ export type AiRun = {
     status: "succeeded" | "failed" | "fallback";
     model: string;
     requestedModel?: string;
+    /** Sampling temperature for this call (brief prose/reconcile = OLLAMA_TEMPERATURE; structurize = 0; classification = classification temperature). */
+    temperature?: number;
     promptId?: string;
     promptVersion?: string;
     promptHash?: string;
@@ -572,6 +583,10 @@ export type AiRun = {
     fallback?: boolean;
     fallbackReason?: string | null;
     error?: string;
+    /** Populated only when PHOENIX_ALLOW_SENSITIVE_CONTENT is true; truncated for export. */
+    tracePromptSystem?: string;
+    tracePromptUser?: string;
+    traceAssistant?: string;
     createdAt: string;
   }>;
   startedAt: string;

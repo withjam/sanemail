@@ -41,6 +41,7 @@ import {
   upsertAccount,
 } from "./store.mjs";
 import { getClassifiedMessages, isSentByMailbox } from "./classifier.mjs";
+import { extractCompletionEvents } from "./completion-extract.mjs";
 import { listQueueJobs } from "./queue.mjs";
 import { enqueueJob } from "./queue.mjs";
 import { resetDemoData } from "./demo-data.mjs";
@@ -170,6 +171,25 @@ function messageAgeHours(message) {
   return Math.max(0, (Date.now() - time) / 36e5);
 }
 
+function messageTextForCompletionExtract(message) {
+  return `${message.subject || ""}\n${message.snippet || ""}\n${message.bodyText || ""}`;
+}
+
+function completionEventsForHome(message, decision) {
+  const fromDecision = decision?.extracted?.completions;
+  if (Array.isArray(fromDecision) && fromDecision.length) return fromDecision;
+  return extractCompletionEvents(messageTextForCompletionExtract(message), message.date);
+}
+
+function hasRecentCompletion(message, decision, hours = 24) {
+  const events = completionEventsForHome(message, decision);
+  const cutoff = Date.now() - hours * 3600 * 1000;
+  return events.some((e) => {
+    const t = new Date(e.occurredAt || message.date || 0).getTime();
+    return Number.isFinite(t) && t >= cutoff;
+  });
+}
+
 export function buildHomeTabs(messages, decisions = new Map()) {
   const visible = messages
     .filter((message) => !message.sane.possibleJunk)
@@ -186,13 +206,23 @@ export function buildHomeTabs(messages, decisions = new Map()) {
       .filter((item) => !item.message.sane.needsReply && item.upcoming)
       .map((item) => item.message),
   ).slice(0, 8);
+  const completed = sortByDateDesc(
+    visible
+      .filter((item) => hasRecentCompletion(item.message, decisions.get(item.message.id)))
+      .map((item) => item.message),
+  ).slice(0, 8);
   const mostRecent = sortByDateDesc(
     visible
-      .filter((item) => !item.message.sane.needsReply && !item.upcoming)
+      .filter(
+        (item) =>
+          !item.message.sane.needsReply &&
+          !item.upcoming &&
+          !hasRecentCompletion(item.message, decisions.get(item.message.id)),
+      )
       .map((item) => item.message),
   ).slice(0, 8);
 
-  return { mostRecent, needsReply, upcoming };
+  return { mostRecent, needsReply, upcoming, completed };
 }
 
 function publicAccount(account) {
@@ -300,6 +330,7 @@ async function routeHome(userId, response) {
           extracted: {
             actions: decision?.extracted?.actions || [],
             deadlines: decision?.extracted?.deadlines || (upcomingSignal ? ["upcoming"] : []),
+            completions: completionEventsForHome(message, decision),
           },
         };
       }),

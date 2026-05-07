@@ -181,6 +181,7 @@ function runAttributes(run) {
     "llm.model_name": run.provider.model,
     "llm.invocation_parameters": JSON.stringify({
       temperature: run.provider.temperature,
+      briefingStructTemperature: run.provider.briefingStructTemperature ?? 0,
       think: run.provider.think,
       briefingModel: run.provider.briefingModel,
       classificationModel: run.provider.classificationModel,
@@ -211,7 +212,10 @@ async function traceModelSummary(run) {
     ...getLLMAttributes({
       provider: run.provider.name,
       modelName: run.provider.model,
-      invocationParameters: { temperature: run.provider.temperature },
+      invocationParameters: {
+        temperature: run.provider.temperature,
+        briefingStructTemperature: run.provider.briefingStructTemperature ?? 0,
+      },
       tokenCount: {
         prompt: run.metrics.estimatedPromptTokens,
         completion: run.metrics.estimatedCompletionTokens,
@@ -262,34 +266,65 @@ async function traceDecisionSummaries(run) {
       "sanemail.suppress_from_today": decision.suppressFromToday,
       "sanemail.actions": decision.extracted.actions,
       "sanemail.deadlines": decision.extracted.deadlines,
+      "sanemail.completions": decision.extracted.completions,
       "sanemail.embedding_hash": decision.embedding.hash,
     }, async () => {});
   }
 }
 
+function llmTraceInputMessages(call, allowSensitive) {
+  if (allowSensitive && (call.tracePromptSystem != null || call.tracePromptUser != null)) {
+    return [
+      { role: "system", content: String(call.tracePromptSystem ?? "") },
+      { role: "user", content: String(call.tracePromptUser ?? "") },
+    ];
+  }
+  return [{ role: "user", content: `input:${call.inputHash}` }];
+}
+
+function llmTraceOutputMessages(call, allowSensitive) {
+  if (allowSensitive && call.traceAssistant != null) {
+    return [{ role: "assistant", content: String(call.traceAssistant) }];
+  }
+  return [{ role: "assistant", content: `output:${call.outputHash || call.status}` }];
+}
+
 async function traceLlmCalls(run) {
+  const allowSensitive = loadConfig().phoenix.allowSensitiveContent;
   for (const call of run.llmCalls || []) {
+    const temperature =
+      call.temperature !== undefined && call.temperature !== null
+        ? call.temperature
+        : run.provider?.temperature;
+    const invocationParameters = {
+      requestedModel: call.requestedModel,
+      pipeline: call.pipeline,
+      stage: call.stage,
+      temperature,
+      attempts: call.attempts,
+      fallback: Boolean(call.fallback),
+    };
+    if (call.stage === "brief_structurize") {
+      invocationParameters.briefingStructTemperature = 0;
+    }
     await withSpan(`sanemail.llm.${call.pipeline}`, {
       ...getLLMAttributes({
         provider: call.provider,
         modelName: call.model,
-        invocationParameters: {
-          requestedModel: call.requestedModel,
-          pipeline: call.pipeline,
-          stage: call.stage,
-          attempts: call.attempts,
-          fallback: Boolean(call.fallback),
-        },
+        invocationParameters,
         tokenCount: {
           prompt: call.promptEvalCount,
           completion: call.evalCount,
           total: call.promptEvalCount + call.evalCount,
         },
-        inputMessages: [{ role: "user", content: `input:${call.inputHash}` }],
-        outputMessages: [{ role: "assistant", content: `output:${call.outputHash || call.status}` }],
+        inputMessages: llmTraceInputMessages(call, allowSensitive),
+        outputMessages: llmTraceOutputMessages(call, allowSensitive),
       }),
       "sanemail.run_id": run.id,
       "sanemail.llm_call_id": call.id,
+      "sanemail.llm.temperature": temperature,
+      ...(call.stage === "brief_structurize" ? { "sanemail.llm.briefing_struct_temperature": 0 } : {}),
+      "sanemail.llm.content_redacted": !allowSensitive,
       "sanemail.pipeline": call.pipeline,
       "sanemail.stage": call.stage,
       "sanemail.call_status": call.status,
@@ -356,6 +391,13 @@ export async function traceVerificationRun(run) {
     "sanemail.latency_ms": run.metrics.latencyMs,
     "llm.provider": run.provider.name,
     "llm.model_name": run.provider.model,
+    "llm.invocation_parameters": JSON.stringify({
+      temperature: run.provider.temperature,
+      briefingStructTemperature: run.provider.briefingStructTemperature ?? 0,
+      think: run.provider.think,
+      briefingModel: run.provider.briefingModel,
+      classificationModel: run.provider.classificationModel,
+    }),
     ...promptAttributes(run.promptRefs),
   }, async () => {
     traceId = activeTraceId();

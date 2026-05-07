@@ -2,6 +2,21 @@
  * Normalizes message_classifications.action_metadata (jsonb) into the API shape
  * for recent-classification rows.
  */
+function normalizeCompletions(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const phrase = typeof item.phrase === "string" ? item.phrase.trim() : "";
+    const occurredAtRaw = typeof item.occurredAt === "string" ? item.occurredAt.trim() : "";
+    if (!phrase || !occurredAtRaw) continue;
+    const t = new Date(occurredAtRaw).getTime();
+    if (!Number.isFinite(t)) continue;
+    out.push({ phrase, occurredAt: new Date(t).toISOString() });
+  }
+  return out.slice(0, 16);
+}
+
 export function normalizeClassificationExtracted(raw) {
   const o = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
   return {
@@ -9,5 +24,6 @@ export function normalizeClassificationExtracted(raw) {
     deadlines: Array.isArray(o.deadlines) ? o.deadlines.filter((x) => typeof x === "string") : [],
     entities: Array.isArray(o.entities) ? o.entities.filter((x) => typeof x === "string") : [],
     replyCue: typeof o.replyCue === "string" && o.replyCue.trim() ? o.replyCue.trim() : null,
+    completions: normalizeCompletions(o.completions),
   };
 }

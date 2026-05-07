@@ -84,7 +84,7 @@ test("AI loop creates instrumented decisions over synthetic mail", () => {
     run.output.briefing.text,
     /visible messages|automated updates|previous briefing|carry forward|suspicious/i,
   );
-  assert.equal(run.output.briefing.prompt.id, "mail-briefing");
+  assert.equal(run.output.briefing.prompt.id, "mail-briefing-prose");
   assert.equal(run.output.briefing.counts.recent, 7);
   assert.equal(run.output.briefing.counts.last7Days, 75);
   assert.equal(run.output.briefing.callouts.length, 4);
@@ -293,7 +293,7 @@ test("synthetic verification suite passes with the local AI loop", async () => {
   const run = await runSyntheticVerification({ persist: false });
 
   assert.equal(run.status, "passed");
-  assert.equal(run.summary.cases, 13);
+  assert.equal(run.summary.cases, 15);
   assert.equal(run.summary.failedCases, 0);
   assert.equal(run.score, 1);
 });

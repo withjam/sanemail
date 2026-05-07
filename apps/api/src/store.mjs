@@ -558,9 +558,9 @@ export async function getClassificationBacklogSummary(accountId) {
 }
 
 export function latestInboxBriefing(store, scopeId) {
-  // The store is already user-scoped when read via readStoreFor(); scopeId is
-  // accepted for backward compatibility and as a defensive filter when callers
-  // pass an accountId rather than relying on the store's user-scope.
+  // Store is user-scoped via readStoreFor(). scopeId is the source connection /
+  // mailbox id (briefing.accountId), not the auth user id — omit or pass null to
+  // take the newest briefing regardless of mailbox.
   return [...(store.inboxBriefings || [])]
     .filter((briefing) => !scopeId || !briefing.accountId || briefing.accountId === scopeId)
     .sort(

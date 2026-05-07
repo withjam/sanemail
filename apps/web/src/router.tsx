@@ -339,18 +339,21 @@ function Dashboard() {
     queryKey: queryKeys.home,
     queryFn: getHome,
   });
-  const [activeTab, setActiveTab] = useState<"mostRecent" | "needsReply" | "upcoming">("needsReply");
+  const [activeTab, setActiveTab] = useState<
+    "mostRecent" | "needsReply" | "upcoming" | "completed"
+  >("needsReply");
 
   if (status.isError) return <ErrorPanel title="Could not load status" error={status.error} />;
   if (home.isError) return <ErrorPanel title="Could not load home" error={home.error} />;
   if (status.isLoading || !status.data || home.isLoading || !home.data) return <Loading label="Loading mailbox" />;
 
   const statusData = status.data;
-  const tabs = home.data.tabs;
+  const tabs = home.data.tabs ?? {};
   const tabItems = [
-    { id: "needsReply" as const, label: "Needs attention", messages: tabs.needsReply },
-    { id: "upcoming" as const, label: "Upcoming", messages: tabs.upcoming },
-    { id: "mostRecent" as const, label: "Most recent", messages: tabs.mostRecent },
+    { id: "needsReply" as const, label: "Needs attention", messages: tabs.needsReply ?? [] },
+    { id: "upcoming" as const, label: "Upcoming", messages: tabs.upcoming ?? [] },
+    { id: "completed" as const, label: "Completed", messages: tabs.completed ?? [] },
+    { id: "mostRecent" as const, label: "Most recent", messages: tabs.mostRecent ?? [] },
   ];
   const active = tabItems.find((item) => item.id === activeTab) || tabItems[0];
 
@@ -378,7 +381,7 @@ function Dashboard() {
               data-testid={`home-tab-${item.id}`}
             >
               <span>{item.label}</span>
-              <span className="tab-count">{item.messages.length}</span>
+              <span className="tab-count">{(item.messages ?? []).length}</span>
             </button>
           ))}
         </div>
@@ -390,7 +393,7 @@ function Dashboard() {
           data-testid="home-tab-panel"
           data-active-tab={active.id}
         >
-          <MessageStack messages={active.messages} empty={emptyForHomeTab(active.id)} />
+          <MessageStack messages={active.messages ?? []} empty={emptyForHomeTab(active.id)} />
         </div>
       </section>
     </div>
@@ -418,9 +421,10 @@ function BriefingPanel({ briefing }: { briefing: InboxBriefing }) {
   );
 }
 
-function emptyForHomeTab(tab: "mostRecent" | "needsReply" | "upcoming") {
+function emptyForHomeTab(tab: "mostRecent" | "needsReply" | "upcoming" | "completed") {
   if (tab === "needsReply") return "Nothing needs attention right now.";
   if (tab === "upcoming") return "No upcoming events, bills, or deadlines detected.";
+  if (tab === "completed") return "No completed events detected in the last 24 hours.";
   return "No recent inbox messages to show.";
 }
 
@@ -532,7 +536,7 @@ function MessageListPage({
 }
 
 function MessageStack({ messages, empty }: { messages: MailMessage[]; empty: string }) {
-  if (!messages.length) return <EmptyState text={empty} />;
+  if (!(messages?.length ?? 0)) return <EmptyState text={empty} />;
   return (
     <div className="message-stack">
       {messages.map((message) => (
@@ -560,8 +564,10 @@ function MessageRow({ message }: { message: MailMessage }) {
         <div className="snippet">{message.snippet || message.bodyText}</div>
       </div>
       <div className="row-meta">
-        <span className={classForCategory(message.sane.category)}>{labelForCategory(message.sane.category)}</span>
-        <span className="score">{Math.round(message.sane.todayScore)}</span>
+        <span className={classForCategory(message.sane?.category ?? "All Mail")}>
+          {labelForCategory(message.sane?.category ?? "All Mail")}
+        </span>
+        <span className="score">{Math.round(message.sane?.todayScore ?? 0)}</span>
       </div>
     </Link>
   );
@@ -606,15 +612,17 @@ function MessageDetailRoute() {
         <h1>{message.subject}</h1>
         <p>{senderName(message.from)} · {formatDate(message.date)}</p>
         <div className="toolbar">
-          <span className={classForCategory(message.sane.category)}>{labelForCategory(message.sane.category)}</span>
-          <span className="pill">score {Math.round(message.sane.todayScore)}</span>
+          <span className={classForCategory(message.sane?.category ?? "All Mail")}>
+            {labelForCategory(message.sane?.category ?? "All Mail")}
+          </span>
+          <span className="pill">score {Math.round(message.sane?.todayScore ?? 0)}</span>
         </div>
       </section>
       <section className="surface">
         <div className="section-header">
           <div>
             <h2>Why</h2>
-            <p>{message.sane.reasons.join(", ")}.</p>
+            <p>{(message.sane?.reasons ?? []).join(", ") || "No ranking reasons recorded."}</p>
           </div>
         </div>
         <div className="feedback-bar">
@@ -631,9 +639,9 @@ function MessageDetailRoute() {
             </button>
           ))}
         </div>
-        {message.feedback.length > 0 && (
+        {(message.feedback?.length ?? 0) > 0 && (
           <p className="feedback-note">
-            Feedback: {message.feedback.map((item) => item.kind).join(", ")}
+            Feedback: {(message.feedback ?? []).map((item) => item.kind).join(", ")}
           </p>
         )}
       </section>
@@ -795,8 +803,9 @@ function AiOpsRoute() {
           <div>
             <h2>Control loop</h2>
             <p>
-              Runs the daily brief pipeline only — one LLM call to draft the greeting from
-              existing decisions. Classification and ranking run as separate batches.
+              Runs the daily brief pipeline: prose generation, optional reconciliation with sent
+              mail (same model temperature), then a temperature-0 JSON structurize step for the UI.
+              Classification and ranking run as separate batches.
             </p>
           </div>
           <div className="toolbar">
@@ -890,7 +899,11 @@ function AiOpsRoute() {
         <div className="section-header padded-header">
           <div>
             <h2>Latest decisions</h2>
-            <p>{latestRun ? `${latestRun.output.decisions.length} messages processed.` : "Run the loop to create decisions."}</p>
+            <p>
+              {latestRun
+                ? `${latestRun.output?.decisions?.length ?? 0} messages processed.`
+                : "Run the loop to create decisions."}
+            </p>
           </div>
         </div>
         {latestRun ? <DecisionList run={latestRun} /> : <EmptyState text="No AI run has been recorded yet." />}
@@ -1053,10 +1066,19 @@ const EMPTY_CLASSIFICATION_EXTRACTED: ClassificationExtractedMetadata = {
   deadlines: [],
   entities: [],
   replyCue: null,
+  completions: [],
 };
 
 function recentClassificationExtracted(item: RecentClassification): ClassificationExtractedMetadata {
-  return item.extracted ?? EMPTY_CLASSIFICATION_EXTRACTED;
+  const raw = item.extracted;
+  if (!raw) return { ...EMPTY_CLASSIFICATION_EXTRACTED };
+  return {
+    actions: Array.isArray(raw.actions) ? raw.actions : [],
+    deadlines: Array.isArray(raw.deadlines) ? raw.deadlines : [],
+    entities: Array.isArray(raw.entities) ? raw.entities : [],
+    replyCue: typeof raw.replyCue === "string" && raw.replyCue.trim() ? raw.replyCue.trim() : null,
+    completions: Array.isArray(raw.completions) ? raw.completions : [],
+  };
 }
 
 function recentClassificationReasons(item: RecentClassification): string[] {
@@ -1068,9 +1090,10 @@ function recentClassificationHasExpandableMetadata(item: RecentClassification) {
   const reasons = recentClassificationReasons(item);
   return (
     reasons.length > 0 ||
-    extracted.entities.length > 0 ||
-    extracted.actions.length > 0 ||
-    extracted.deadlines.length > 0 ||
+    (extracted.entities?.length ?? 0) > 0 ||
+    (extracted.actions?.length ?? 0) > 0 ||
+    (extracted.deadlines?.length ?? 0) > 0 ||
+    (extracted.completions?.length ?? 0) > 0 ||
     Boolean(extracted.replyCue)
   );
 }
@@ -1115,6 +1138,19 @@ function RecentClassificationsList({ items }: { items: RecentClassification[] })
                 <ClassificationMetaChips label="Entities" values={extracted.entities} />
                 <ClassificationMetaChips label="Actions" values={extracted.actions} />
                 <ClassificationMetaChips label="Deadlines" values={extracted.deadlines} />
+                {extracted.completions?.length ? (
+                  <div className="classification-meta-section">
+                    <span className="classification-meta-label">Completed</span>
+                    <ul className="classification-meta-reasons">
+                      {extracted.completions.map((c, i) => (
+                        <li key={i}>
+                          {c.phrase}
+                          {c.occurredAt ? <> · {formatDate(c.occurredAt)}</> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
                 {extracted.replyCue ? (
                   <div className="classification-meta-section">
                     <span className="classification-meta-label">Reply cue</span>
