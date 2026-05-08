@@ -10,6 +10,7 @@ import {
   Activity,
   AlertTriangle,
   Archive,
+  BookOpen,
   BrainCircuit,
   Check,
   CheckCircle2,
@@ -35,8 +36,8 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
-import { useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
 import type {
   AccountSummary,
   AiRun,
@@ -47,6 +48,7 @@ import type {
   InboxBriefing,
   MailMessage,
   MailProvider,
+  MessagePreview,
   PhoenixObservabilityStatus,
   RecentClassification,
   StatusResponse,
@@ -60,6 +62,7 @@ import {
   getAiControl,
   getHome,
   getMessage,
+  getMessagePreview,
   getMessages,
   getRecentClassifications,
   getStatus,
@@ -88,6 +91,242 @@ function formatDate(value: string) {
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+const BRIEFING_MESSAGE_ID_PREFIX = "[messageId:";
+
+/** Scan for [messageId:…] tags; id may contain colons (canonical store ids). */
+function collectMessageIdRefsFromText(text: string, seen: Set<string>, out: string[]) {
+  let i = 0;
+  while (i < text.length) {
+    const open = text.indexOf(BRIEFING_MESSAGE_ID_PREFIX, i);
+    if (open < 0) break;
+    const contentStart = open + BRIEFING_MESSAGE_ID_PREFIX.length;
+    const close = text.indexOf("]", contentStart);
+    if (close < 0) break;
+    const ref = text.slice(contentStart, close).trim();
+    if (ref && !seen.has(ref)) {
+      seen.add(ref);
+      out.push(ref);
+    }
+    i = close + 1;
+  }
+}
+
+function collectMessageRefsFromBriefing(briefing: InboxBriefing): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  if (briefing.text) collectMessageIdRefsFromText(briefing.text, seen, out);
+  return out;
+}
+
+/** Split prose briefing into paragraphs, preserving line breaks within a paragraph. */
+function splitBriefingParagraphs(text: string): string[] {
+  const trimmed = (text || "").trim();
+  if (!trimmed) return [];
+  return trimmed
+    .split(/\n[ \t]*\n+/)
+    .map((paragraph) => paragraph.trim())
+    .filter((paragraph) => paragraph.length > 0);
+}
+
+type BriefingParagraphPiece =
+  | { kind: "text"; value: string }
+  | { kind: "link"; refKey: string; text: string };
+
+function parseBriefingParagraphPieces(paragraph: string): BriefingParagraphPiece[] {
+  const pieces: BriefingParagraphPiece[] = [];
+  let cursor = 0;
+  while (cursor <= paragraph.length) {
+    const open = paragraph.indexOf(BRIEFING_MESSAGE_ID_PREFIX, cursor);
+    if (open < 0) {
+      if (cursor < paragraph.length) {
+        pieces.push({ kind: "text", value: paragraph.slice(cursor) });
+      }
+      break;
+    }
+    const raw = paragraph.slice(cursor, open);
+    const contentStart = open + BRIEFING_MESSAGE_ID_PREFIX.length;
+    const close = paragraph.indexOf("]", contentStart);
+    if (close < 0) {
+      if (raw.length) pieces.push({ kind: "text", value: raw });
+      pieces.push({ kind: "text", value: paragraph.slice(open) });
+      break;
+    }
+    const refKey = paragraph.slice(contentStart, close).trim();
+    if (refKey) {
+      const text = raw.trimEnd();
+      pieces.push({ kind: "link", refKey, text: text.length ? text : "View message" });
+    } else if (raw.length) {
+      pieces.push({ kind: "text", value: raw });
+    }
+    cursor = close + 1;
+  }
+  return pieces;
+}
+
+type BriefingRefMeta = {
+  id: string | null;
+  preview: MessagePreview | null;
+  isPending: boolean;
+  isError: boolean;
+};
+
+function BriefingMessageRef({
+  refKey,
+  linkText,
+  refMeta,
+}: {
+  refKey: string;
+  linkText: string;
+  refMeta: Map<string, BriefingRefMeta>;
+}) {
+  const [citeHover, setCiteHover] = useState(false);
+  const meta = refMeta.get(refKey);
+  const id = meta?.id ?? null;
+  const preview = meta?.preview ?? null;
+  const showTip = citeHover && Boolean(preview);
+
+  const citeIcon = (
+    <BookOpen className="briefing-ref-icon" size={12} strokeWidth={2.25} aria-hidden />
+  );
+
+  const hovercard =
+    showTip && preview ? (
+      <span className="briefing-ref-popover" role="tooltip">
+        <strong className="briefing-ref-popover-subject">{preview.subject}</strong>
+        <span className="muted">{senderName(preview.from)}</span>
+        {preview.date ? <span className="muted">{formatDate(preview.date)}</span> : null}
+        {preview.category ? (
+          <span className={`briefing-ref-popover-cat ${classForCategory(preview.category)}`}>{preview.category}</span>
+        ) : null}
+        {preview.snippet ? <p className="briefing-ref-popover-snippet">{preview.snippet}</p> : null}
+      </span>
+    ) : null;
+
+  if (id && !meta?.isError) {
+    return (
+      <span className="briefing-ref-unit">
+        <Link
+          to="/message/$messageId"
+          params={{ messageId: id }}
+          className="briefing-ref-link"
+          data-testid="briefing-message-link"
+        >
+          {linkText}
+        </Link>
+        <sup className="briefing-ref-sup">
+          <span
+            className="briefing-ref-cite-wrap"
+            onMouseEnter={() => setCiteHover(true)}
+            onMouseLeave={() => setCiteHover(false)}
+          >
+            <Link
+              to="/message/$messageId"
+              params={{ messageId: id }}
+              className="briefing-ref-cite"
+              aria-label={preview?.subject ? `Preview source: ${preview.subject}` : "Open linked message"}
+              data-testid="briefing-message-cite"
+            >
+              {citeIcon}
+            </Link>
+            {hovercard}
+          </span>
+        </sup>
+      </span>
+    );
+  }
+
+  return (
+    <span className="briefing-ref-unit">
+      <span
+        className={
+          meta?.isPending
+            ? "briefing-ref-fallback pending"
+            : meta?.isError
+              ? "briefing-ref-fallback error"
+              : "briefing-ref-fallback"
+        }
+      >
+        {linkText}
+      </span>
+      <sup className="briefing-ref-sup">
+        <span
+          className={`briefing-ref-cite-wrap ${preview ? "has-preview" : ""}`}
+          onMouseEnter={() => setCiteHover(true)}
+          onMouseLeave={() => setCiteHover(false)}
+        >
+          <span className="briefing-ref-cite briefing-ref-cite-static" aria-hidden>
+            {citeIcon}
+          </span>
+          {hovercard}
+        </span>
+      </sup>
+    </span>
+  );
+}
+
+function BriefingParagraph({
+  paragraph,
+  refMeta,
+}: {
+  paragraph: string;
+  refMeta: Map<string, BriefingRefMeta>;
+}) {
+  const pieces = useMemo(() => parseBriefingParagraphPieces(paragraph), [paragraph]);
+  return (
+    <>
+      {pieces.map((piece, i) =>
+        piece.kind === "text" ? (
+          <span key={i}>{piece.value}</span>
+        ) : (
+          <BriefingMessageRef key={i} refKey={piece.refKey} linkText={piece.text} refMeta={refMeta} />
+        ),
+      )}
+    </>
+  );
+}
+
+function BriefingPanel({ briefing }: { briefing: InboxBriefing }) {
+  // Display the prose briefing directly, split into paragraphs.
+  const paragraphs = useMemo(() => splitBriefingParagraphs(briefing.text), [briefing.text]);
+
+  const refs = useMemo(() => collectMessageRefsFromBriefing(briefing), [briefing]);
+
+  const previewQueries = useQueries({
+    queries: refs.map((ref) => ({
+      queryKey: queryKeys.messagePreview(ref),
+      queryFn: () => getMessagePreview(ref),
+      staleTime: 300_000,
+    })),
+  });
+
+  const refMeta = useMemo(() => {
+    const map = new Map<string, BriefingRefMeta>();
+    refs.forEach((ref, i) => {
+      const q = previewQueries[i];
+      const preview = q.data?.preview ?? null;
+      map.set(ref, {
+        id: preview?.id ?? null,
+        preview,
+        isPending: q.isPending,
+        isError: q.isError,
+      });
+    });
+    return map;
+  }, [refs, previewQueries]);
+
+  return (
+    <section className="briefing-content" data-testid="inbox-briefing">
+      <div className="briefing-copy">
+        {paragraphs.map((paragraph, index) => (
+          <p key={`${index}-${paragraph.slice(0, 24)}`}>
+            <BriefingParagraph paragraph={paragraph} refMeta={refMeta} />
+          </p>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function formatPercent(value: number) {
@@ -400,27 +639,6 @@ function Dashboard() {
   );
 }
 
-function BriefingPanel({ briefing }: { briefing: InboxBriefing }) {
-  const paragraphs = briefing.narrative
-    ? [
-        briefing.narrative.status,
-        briefing.narrative.needToKnow,
-        briefing.narrative.mightBeMissing,
-        briefing.narrative.needsAttention,
-      ].filter(Boolean)
-    : [briefing.text];
-
-  return (
-    <section className="briefing-content" data-testid="inbox-briefing">
-      <div className="briefing-copy">
-        {paragraphs.map((paragraph) => (
-          <p key={paragraph}>{paragraph}</p>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function emptyForHomeTab(tab: "mostRecent" | "needsReply" | "upcoming" | "completed") {
   if (tab === "needsReply") return "Nothing needs attention right now.";
   if (tab === "upcoming") return "No upcoming events, bills, or deadlines detected.";
@@ -656,9 +874,11 @@ const aiRunModeOptions: { id: AiRunMode; label: string; hint: string }[] = [
   { id: "iterative", label: "Iterative", hint: "Only messages newer than the last brief" },
 ];
 
+/** Matches default `AI_RUN_LIMIT` / server cap for daily brief scoring on this page. */
+const AI_OPS_DAILY_BRIEF_RUN_LIMIT = 500;
+
 function AiOpsRoute() {
   const [runMode, setRunMode] = useState<AiRunMode>("auto");
-  const [runLimit, setRunLimit] = useState<number>(500);
   const [classificationLimit, setClassificationLimit] = useState<number>(10);
   const status = useStatus();
   const query = useQuery({
@@ -771,25 +991,11 @@ function AiOpsRoute() {
               {synthesizeMutation.isPending ? <Loader2 className="spin" size={17} /> : <Database size={17} />}
               Synthesize batch
             </button>
-            <button
-              className="button"
-              onClick={() => classifyMutation.mutate()}
-              disabled={classifyMutation.isPending || synthesizeMutation.isPending}
-              data-testid="ai-classify-unclassified"
-            >
-              {classifyMutation.isPending ? <Loader2 className="spin" size={17} /> : <MailCheck size={17} />}
-              Classify unclassified
-            </button>
           </div>
         </div>
         {synthesizeMutation.isError ? (
           <p className="ops-warn" data-testid="ai-synthesize-error">
             Ingest failed: {synthesizeMutation.error instanceof Error ? synthesizeMutation.error.message : String(synthesizeMutation.error)}
-          </p>
-        ) : null}
-        {classifyMutation.isError ? (
-          <p className="ops-warn" data-testid="ai-classify-error">
-            Classification failed: {classifyMutation.error instanceof Error ? classifyMutation.error.message : String(classifyMutation.error)}
           </p>
         ) : null}
         <div className="ops-grid">
@@ -803,9 +1009,9 @@ function AiOpsRoute() {
           <div>
             <h2>Control loop</h2>
             <p>
-              Runs the daily brief pipeline: prose generation, optional reconciliation with sent
-              mail (same model temperature), then a temperature-0 JSON structurize step for the UI.
-              Classification and ranking run as separate batches.
+              Runs the daily brief pipeline: prose generation followed by optional reconciliation
+              with sent mail (same model temperature). The prose drives both the UI and
+              next-briefing memory. Classification and ranking run as separate batches.
             </p>
           </div>
           <div className="toolbar">
@@ -825,39 +1031,14 @@ function AiOpsRoute() {
                 </button>
               ))}
             </div>
-            <label className="ai-run-limit" title="Max non-junk messages to score before drafting the brief">
-              <span className="ai-run-limit-label">Non-junk</span>
-              <input
-                type="number"
-                min={1}
-                max={500}
-                step={10}
-                value={runLimit}
-                onChange={(event) => {
-                  const next = Number(event.target.value);
-                  if (Number.isFinite(next) && next > 0) setRunLimit(Math.min(500, Math.floor(next)));
-                }}
-                disabled={runMutation.isPending}
-                data-testid="ai-run-limit"
-              />
-            </label>
             <button
               className="button primary"
-              onClick={() => runMutation.mutate({ mode: runMode, limit: runLimit })}
+              onClick={() => runMutation.mutate({ mode: runMode, limit: AI_OPS_DAILY_BRIEF_RUN_LIMIT })}
               disabled={runMutation.isPending}
               data-testid="ai-run-loop"
             >
               {runMutation.isPending ? <Loader2 className="spin" size={17} /> : <BrainCircuit size={17} />}
               Run daily brief
-            </button>
-            <button
-              className="button"
-              onClick={() => verifyMutation.mutate()}
-              disabled={verifyMutation.isPending}
-              data-testid="ai-verify"
-            >
-              {verifyMutation.isPending ? <Loader2 className="spin" size={17} /> : <FlaskConical size={17} />}
-              Verify
             </button>
           </div>
         </div>
@@ -895,19 +1076,6 @@ function AiOpsRoute() {
           ))}
         </div>
       </section>
-      <section className="surface flush">
-        <div className="section-header padded-header">
-          <div>
-            <h2>Latest decisions</h2>
-            <p>
-              {latestRun
-                ? `${latestRun.output?.decisions?.length ?? 0} messages processed.`
-                : "Run the loop to create decisions."}
-            </p>
-          </div>
-        </div>
-        {latestRun ? <DecisionList run={latestRun} /> : <EmptyState text="No AI run has been recorded yet." />}
-      </section>
       <section className="surface flush" data-testid="ai-recent-classifications">
         <div className="section-header padded-header">
           <div>
@@ -918,7 +1086,23 @@ function AiOpsRoute() {
                 : "Loading persisted classifications…"}
             </p>
           </div>
+          <div className="toolbar">
+            <button
+              className="button"
+              onClick={() => classifyMutation.mutate()}
+              disabled={classifyMutation.isPending || synthesizeMutation.isPending}
+              data-testid="ai-classify-unclassified"
+            >
+              {classifyMutation.isPending ? <Loader2 className="spin" size={17} /> : <MailCheck size={17} />}
+              Classify unclassified
+            </button>
+          </div>
         </div>
+        {classifyMutation.isError ? (
+          <p className="ops-warn flush-section-warn" data-testid="ai-classify-error">
+            Classification failed: {classifyMutation.error instanceof Error ? classifyMutation.error.message : String(classifyMutation.error)}
+          </p>
+        ) : null}
         {recentClassificationsQuery.isError ? (
           <>
             <EmptyState text="Could not load recent classifications." />
@@ -941,6 +1125,17 @@ function AiOpsRoute() {
           <div>
             <h2>Verification cases</h2>
             <p>{latestVerification ? `${latestVerification.summary.passedCases}/${latestVerification.summary.cases} cases passed.` : "Run verification to score the synthetic suite."}</p>
+          </div>
+          <div className="toolbar">
+            <button
+              className="button"
+              onClick={() => verifyMutation.mutate()}
+              disabled={verifyMutation.isPending}
+              data-testid="ai-verify"
+            >
+              {verifyMutation.isPending ? <Loader2 className="spin" size={17} /> : <FlaskConical size={17} />}
+              Verify
+            </button>
           </div>
         </div>
         {latestVerification ? <VerificationCases run={latestVerification} /> : <EmptyState text="No verification run has been recorded yet." />}
@@ -1035,28 +1230,6 @@ function VerificationSummary({ run }: { run: AiVerificationRun | null }) {
       <strong>{run.status}</strong>
       <span>{run.summary.passedCases}/{run.summary.cases} cases · score {formatPercent(run.score)}</span>
       <span className="muted">{run.suiteId}</span>
-    </div>
-  );
-}
-
-function DecisionList({ run }: { run: AiRun }) {
-  const decisions = [...run.output.decisions].sort((a, b) => b.recsysScore - a.recsysScore).slice(0, 8);
-
-  return (
-    <div className="decision-list">
-      {decisions.map((decision) => (
-        <div className="decision-row" key={decision.messageId}>
-          <div>
-            <div className="subject-line">{decision.subject}</div>
-            <div className="snippet">{senderName(decision.from)} · input {shortHash(decision.instrumentation.inputHash)}</div>
-          </div>
-          <div className="row-meta">
-            <span className={classForCategory(decision.category)}>{decision.category}</span>
-            <span className="pill">rank {decision.recsysScore}</span>
-            <span className="pill">conf {formatPercent(decision.confidence)}</span>
-          </div>
-        </div>
-      ))}
     </div>
   );
 }

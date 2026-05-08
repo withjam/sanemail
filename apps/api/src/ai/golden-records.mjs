@@ -7,7 +7,7 @@ const goldenRecords = [
   {
     id: "golden-day-summary-v1",
     featureSetId: GOLDEN_FEATURE_SET_ID,
-    promptIds: ["mail-briefing-prose", "mail-briefing-structurize"],
+    promptIds: ["mail-briefing-prose"],
     title: "Summarize the day",
     description:
       "Aggregate the synthetic mailbox into the homepage briefing paragraph.",
@@ -38,40 +38,6 @@ const goldenRecords = [
         mightBeMissing: "",
         needsAttention: "",
       },
-      callouts: [
-        {
-          kind: "new_attention",
-          label: "Needs attention",
-          title: "Can you review the lease renewal today",
-          body:
-            "Maya Chen appears to need a review. Time cue: tomorrow afternoon.",
-          messageId: "gmail:demo@example.com:message:demo-lease-review",
-        },
-        {
-          kind: "new_attention",
-          label: "Needs attention",
-          title: "Please sign the school trip form",
-          body:
-            "Jordan Rivera appears to need a signature. Time cue: by Friday.",
-          messageId: "gmail:demo@example.com:message:demo-school-form",
-        },
-        {
-          kind: "new_attention",
-          label: "Needs attention",
-          title: "Dinner this weekend",
-          body:
-            "Alex Morgan appears to need a reply. Time cue: Saturday evening.",
-          messageId: "gmail:demo@example.com:message:demo-dinner",
-        },
-        {
-          kind: "new_attention",
-          label: "Needs attention",
-          title: "Re: Contractor estimate for the porch",
-          body:
-            "Nina Patel appears to need a review. Time cue: by Monday.",
-          messageId: "gmail:demo@example.com:message:golden-action-01-b",
-        },
-      ],
       counts: {
         visible: 177,
         recent: 7,
@@ -122,7 +88,7 @@ const goldenRecords = [
   {
     id: "golden-day-summary-carryover-v1",
     featureSetId: GOLDEN_FEATURE_SET_ID,
-    promptIds: ["mail-briefing-prose", "mail-briefing-structurize"],
+    promptIds: ["mail-briefing-prose"],
     title: "Summarize the day with prior context",
     description:
       "Aggregate the synthetic mailbox while carrying still-relevant reminders from the previous briefing.",
@@ -147,40 +113,6 @@ const goldenRecords = [
         mightBeMissing: "",
         needsAttention: "",
       },
-      callouts: [
-        {
-          kind: "carry_over",
-          label: "Needs attention",
-          title: "Can you review the lease renewal today",
-          body:
-            "Maya Chen appears to need a review. Time cue: tomorrow afternoon.",
-          messageId: "gmail:demo@example.com:message:demo-lease-review",
-        },
-        {
-          kind: "carry_over",
-          label: "Needs attention",
-          title: "Re: Contractor estimate for the porch",
-          body:
-            "Nina Patel appears to need a review. Time cue: by Monday.",
-          messageId: "gmail:demo@example.com:message:golden-action-01-b",
-        },
-        {
-          kind: "new_attention",
-          label: "Needs attention",
-          title: "Please sign the school trip form",
-          body:
-            "Jordan Rivera appears to need a signature. Time cue: by Friday.",
-          messageId: "gmail:demo@example.com:message:demo-school-form",
-        },
-        {
-          kind: "new_attention",
-          label: "Needs attention",
-          title: "Dinner this weekend",
-          body:
-            "Alex Morgan appears to need a reply. Time cue: Saturday evening.",
-          messageId: "gmail:demo@example.com:message:demo-dinner",
-        },
-      ],
       counts: {
         visible: 177,
         recent: 7,
@@ -309,22 +241,29 @@ function sameJson(actual, expected) {
   return hashValue(actual) === hashValue(expected);
 }
 
+/** Order of briefing messageIds is not part of the contract (carry-over may be prepended). */
+function sameStringArrayAsMultiset(expected, actual) {
+  if (!Array.isArray(expected) || !Array.isArray(actual)) return false;
+  if (expected.length !== actual.length) return false;
+  const tally = new Map();
+  for (const id of expected) {
+    tally.set(id, (tally.get(id) || 0) + 1);
+  }
+  for (const id of actual) {
+    const n = tally.get(id);
+    if (!n) return false;
+    if (n === 1) tally.delete(id);
+    else tally.set(id, n - 1);
+  }
+  return tally.size === 0;
+}
+
 function includesNormalized(value, expected) {
   return String(value || "").toLowerCase().includes(String(expected || "").toLowerCase());
 }
 
 function check(name, expected, actual, passed = actual === expected) {
   return { name, expected, actual, passed };
-}
-
-function normalizedCallouts(callouts = []) {
-  return callouts.map((callout) => ({
-    kind: callout.kind,
-    label: callout.label,
-    title: callout.title,
-    body: callout.body,
-    messageId: callout.messageId,
-  }));
 }
 
 function evaluateDaySummary(record, aiRun) {
@@ -343,22 +282,12 @@ function evaluateDaySummary(record, aiRun) {
           ),
         ]
       : []),
-    ...(expected.callouts
-      ? [
-          check(
-            "callouts",
-            expected.callouts,
-            normalizedCallouts(briefing?.callouts),
-            sameJson(normalizedCallouts(briefing?.callouts), expected.callouts),
-          ),
-        ]
-      : []),
     check("counts", expected.counts, briefing?.counts, sameJson(briefing?.counts, expected.counts)),
     check(
       "messageIds",
       expected.messageIds,
       briefing?.messageIds || [],
-      sameJson(briefing?.messageIds || [], expected.messageIds),
+      sameStringArrayAsMultiset(expected.messageIds, briefing?.messageIds || []),
     ),
     ...(expected.carryOver
       ? [

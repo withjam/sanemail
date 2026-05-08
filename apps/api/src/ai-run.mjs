@@ -74,13 +74,7 @@ debugLog("run metrics", run.metrics);
 debugLog("briefing output", {
   text: run.output.briefing?.text,
   narrative: run.output.briefing?.narrative,
-  callouts: (run.output.briefing?.callouts || []).map((callout) => ({
-    kind: callout.kind,
-    label: callout.label,
-    title: callout.title,
-    body: callout.body,
-    messageId: callout.messageId,
-  })),
+  messageIds: (run.output.briefing?.messageIds || []).slice(0, 12),
   prompt: run.output.briefing?.prompt,
   memory: run.output.briefing?.memory,
 });

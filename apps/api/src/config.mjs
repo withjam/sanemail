@@ -139,7 +139,7 @@ export function loadConfig() {
         thinkEnv("AI_CLASSIFICATION_THINK", false),
       ),
       apiKey: process.env.OLLAMA_API_KEY || "",
-      /** Creative temperature for briefing prose + reconciliation (final structurize pass is always 0). */
+      /** Creative temperature for briefing prose + reconciliation. */
       temperature: Number(process.env.OLLAMA_TEMPERATURE || 0),
       classificationTemperature: Number(process.env.OLLAMA_CLASSIFICATION_TEMPERATURE || 0),
     },

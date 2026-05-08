@@ -365,6 +365,122 @@ textarea {
   gap: 10px;
 }
 
+.briefing-ref-unit {
+  position: relative;
+  display: inline;
+  margin-inline-end: 0.28em;
+  white-space: normal;
+}
+
+.briefing-ref-link {
+  color: inherit;
+  font-weight: inherit;
+  text-decoration: none;
+  border-bottom: none;
+  cursor: pointer;
+}
+
+.briefing-ref-sup {
+  font-size: 0.72em;
+  line-height: 0;
+  vertical-align: super;
+  font-weight: normal;
+  margin-inline-start: 0.06em;
+}
+
+.briefing-ref-cite-wrap {
+  position: relative;
+  display: inline-block;
+  vertical-align: baseline;
+  line-height: 1;
+}
+
+.briefing-ref-cite {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  text-decoration: none;
+  border-radius: 3px;
+  padding: 1px;
+  vertical-align: middle;
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+
+.briefing-ref-cite:hover {
+  color: var(--accent, #2563eb);
+  background: var(--surface-2);
+}
+
+.briefing-ref-cite-static {
+  cursor: default;
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.briefing-ref-cite-wrap.has-preview .briefing-ref-cite-static {
+  pointer-events: auto;
+  cursor: help;
+  opacity: 0.85;
+}
+
+.briefing-ref-icon {
+  display: block;
+}
+
+.briefing-ref-fallback {
+  border-bottom: none;
+  font-weight: inherit;
+  cursor: default;
+}
+
+.briefing-ref-fallback.pending {
+  opacity: 0.75;
+}
+
+.briefing-ref-fallback.error {
+  color: var(--danger, #b00020);
+}
+
+.briefing-ref-popover {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: calc(100% + 8px);
+  z-index: 50;
+  width: min(340px, 92vw);
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--ink);
+  pointer-events: none;
+}
+
+.briefing-ref-popover-subject {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.briefing-ref-popover-snippet {
+  margin: 0;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.briefing-ref-popover-cat {
+  width: fit-content;
+  font-size: 12px;
+}
+
 .briefing-content p,
 .briefing-callout span {
   margin: 0;
@@ -504,6 +620,10 @@ textarea {
 .ops-warn {
   color: var(--danger, #b00020);
   font-weight: 500;
+}
+
+.flush-section-warn {
+  margin: 0 16px 12px;
 }
 
 .ops-errors {

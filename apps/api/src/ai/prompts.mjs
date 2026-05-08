@@ -111,7 +111,7 @@ const promptDefinitions = [
       ],
     },
     system: [
-      "You are SaneMail's single-message email classification model.",
+      "You are TogoMails's single-message email classification model.",
       "Classify one source-agnostic canonical message after it has been durably ingested.",
       "Keep stable system placement separate from personalized user message types.",
       "Prefer existing active taxonomy types when they fit.",
@@ -126,30 +126,30 @@ const promptDefinitions = [
   },
   {
     id: "mail-briefing-prose",
-    version: "2026-05-08.1",
+    version: "2026-05-08.2",
     stage: "briefing",
     title: "Inbox briefing (prose)",
     description:
-      "Draft a natural-language inbox briefing; JSON is produced in a separate structurize step.",
+      "Draft a natural-language inbox briefing;",
     provider: "mock-local",
     model: "deterministic-briefing-v0",
-    temperature: 0.35,
+    temperature: 0.7,
     variables: [
       "recent",
       "last7Days",
       "needsReply",
       "upcoming",
       "carryOver",
-      "callouts",
+      "attentionHighlights",
       "informational",
       "hidden",
       "context",
     ],
     responseSchema: { prose: "string" },
     system:
-      "You are a personal chief of staff reviewing email. Write in warm, direct prose. Prefer action and clarity over filler. Do not output JSON or markdown code fences. Do not quote aggregate counts from the context.",
+      "You are a personal chief of staff reviewing email. Write in warm, conversational prose. Prefer action and clarity over filler. Do not output JSON or markdown code fences. Do not quote aggregate counts from the context. Preserve entire messageId string when calling out messages",
     userTemplate:
-      "Draft my inbox briefing in plain text.\n\nCover: where things stand overall; what I need to know first; what might need a reply or decision soon; anything I may be neglecting; what is upcoming.\n\nUse this structured context (including message ids in candidate callouts):\n{{context}}\n\nWhen you refer to a specific message, include its id on the same line using exactly this form: [messageId:THE_ID] so downstream tools can link it.\n\nWrite readable paragraphs or short sections with clear headings in plain text (no JSON).",
+      "Summarize the status of my email inbox like you were my friendly and helpful personal chief of staff.  Write separate paragraphs about what requires my attention, what is likely upcoming, and remind me of anything I may be neglecting. Prefer recent messages to old messages, but take them into account to ensure I haven't forgotten anything important. Give me a conversational summary, not a numeric regurgitation.\n\nUse this structured context (candidate attention items list message ids):\n{{context}}\n\nWhen you refer to a specific message, put its full canonical id inside the tag using exactly: [messageId:THE_FULL_MESSAGE_ID] (the id may contain colons — copy it verbatim from the context). Place the tag at the end of the sentence or clause about that message. Do not add additional formatting or struture, just write in plain text.",
   },
   {
     id: "mail-briefing-reconcile",
@@ -157,10 +157,10 @@ const promptDefinitions = [
     stage: "briefing",
     title: "Inbox briefing reconciliation (prose)",
     description:
-      "Adjust a prose inbox briefing using recently sent mail; still plain text until structurize.",
+      "Adjust a prose inbox briefing using recently sent mail; plain text output for direct display + memory.",
     provider: "mock-local",
     model: "deterministic-briefing-v0",
-    temperature: 0.35,
+    temperature: 0.7,
     variables: ["briefing", "sentMail"],
     responseSchema: { prose: "string" },
     system: [
@@ -171,50 +171,7 @@ const promptDefinitions = [
       "Output plain text only — no JSON, no code fences.",
     ].join(" "),
     userTemplate:
-      "Prose briefing draft:\n{{briefing}}\n\nRecently sent mail from this mailbox (most recent first):\n{{sentMail}}\n\nReturn the full revised prose briefing only.",
-  },
-  {
-    id: "mail-briefing-structurize",
-    version: "2026-05-08.1",
-    stage: "briefing",
-    title: "Inbox briefing structurize",
-    description: "Convert final prose + anchors into UI JSON (temperature 0 at inference).",
-    provider: "mock-local",
-    model: "deterministic-briefing-v0",
-    temperature: 0,
-    variables: ["prose", "anchors"],
-    responseSchema: {
-      text: "string",
-      narrative: {
-        status: "string",
-        needToKnow: "string",
-        mightBeMissing: "string",
-        needsAttention: "string",
-      },
-      callouts: [
-        {
-          kind: "attention | new_attention | carry_over",
-          label: "string",
-          title: "string",
-          body: "string",
-          messageId: "string",
-          messageIds: "string[]",
-          priority: "number",
-          deliveredAt: "string",
-        },
-      ],
-      counts: "object",
-      messageIds: "string[]",
-    },
-    system: [
-      "You convert a chief-of-staff prose inbox briefing into compact JSON for a web UI.",
-      "Use ONLY the provided anchors for counts, messageIds, and messageId values in callouts. Do not invent message ids.",
-      "Choose at most 4 callouts; pick the ones best supported by the prose.",
-      "Map prose into text (short executive summary) plus narrative.status, needToKnow, mightBeMissing, needsAttention.",
-      "Return JSON only, matching the schema described in the user message.",
-    ].join(" "),
-    userTemplate:
-      "Prose briefing:\n{{prose}}\n\nAnchors (copy counts and messageIds exactly; callouts must use only these messageIds):\n{{anchors}}\n\nReturn JSON: {\"text\":string,\"narrative\":{\"status\":string,\"needToKnow\":string,\"mightBeMissing\":string,\"needsAttention\":string},\"callouts\":[...],\"counts\":object,\"messageIds\":string[]}. callouts items: kind (attention|new_attention|carry_over), label, title, body, messageId, messageIds, priority, deliveredAt.",
+      "Reconcile my briefing in light of the messages I've sent recently. Maintain the tone, attitude, and style of the original briefing. Prose briefing draft:\n{{briefing}}\n\nRecently sent mail from this mailbox (most recent first):\n{{sentMail}}\n\nReturn the full revised prose briefing only.",
   },
 ];
 

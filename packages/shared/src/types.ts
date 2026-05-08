@@ -258,6 +258,21 @@ export type MessageResponse = {
   message: MailMessage;
 };
 
+/** Metadata for hovers / links; no body text. */
+export type MessagePreview = {
+  id: string;
+  subject: string;
+  from: string;
+  date: string | null;
+  snippet: string;
+  category: SaneCategory | null;
+  needsReply: boolean | null;
+};
+
+export type MessagePreviewResponse = {
+  preview: MessagePreview;
+};
+
 export type SyncResponse = {
   ok: true;
   result: {
@@ -419,17 +434,6 @@ export type InboxBriefing = {
     mightBeMissing: string;
     needsAttention: string;
   };
-  callouts?: Array<{
-    id: string;
-    kind: "attention" | "new_attention" | "carry_over";
-    label: string;
-    title: string;
-    body: string;
-    messageId?: string;
-    messageIds: string[];
-    priority: number;
-    deliveredAt?: string;
-  }>;
   generatedAt: string;
   source: string;
   model: string;
@@ -506,7 +510,6 @@ export type AiRun = {
     briefingModel?: string;
     classificationModel?: string;
     temperature: number;
-    briefingStructTemperature?: number;
     think?: string | boolean;
     host?: string;
     classifyMessages?: boolean;
@@ -565,7 +568,7 @@ export type AiRun = {
     status: "succeeded" | "failed" | "fallback";
     model: string;
     requestedModel?: string;
-    /** Sampling temperature for this call (brief prose/reconcile = OLLAMA_TEMPERATURE; structurize = 0; classification = classification temperature). */
+    /** Sampling temperature for this call (brief prose/reconcile = OLLAMA_TEMPERATURE; classification = classification temperature). */
     temperature?: number;
     promptId?: string;
     promptVersion?: string;

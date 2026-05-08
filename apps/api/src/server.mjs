@@ -41,6 +41,7 @@ import {
   upsertAccount,
 } from "./store.mjs";
 import { getClassifiedMessages, isSentByMailbox } from "./classifier.mjs";
+import { findMessageForUserRef, messagePreviewForStore } from "./message-resolve.mjs";
 import { extractCompletionEvents } from "./completion-extract.mjs";
 import { listQueueJobs } from "./queue.mjs";
 import { enqueueJob } from "./queue.mjs";
@@ -350,12 +351,31 @@ async function routeHome(userId, response) {
 async function routeMessage(userId, messageId, response) {
   const store = await readStoreFor(userId);
   const account = pickPrimaryAccount(store);
-  const message = getMessageList(store, account).find((item) => item.id === messageId);
+  let message = getMessageList(store, account).find((item) => item.id === messageId);
+  if (!message) {
+    const recovered = findMessageForUserRef(store, messageId);
+    if (recovered && recovered.id === messageId) message = recovered;
+  }
   if (!message) {
     sendJson(response, { error: "message_not_found" }, 404);
     return;
   }
   sendJson(response, { message });
+}
+
+async function routeMessagePreview(userId, ref, response) {
+  const store = await readStoreFor(userId);
+  const message = findMessageForUserRef(store, ref);
+  if (!message) {
+    sendJson(response, { error: "message_not_found" }, 404);
+    return;
+  }
+  const preview = messagePreviewForStore(store, message);
+  if (!preview) {
+    sendJson(response, { error: "message_not_found" }, 404);
+    return;
+  }
+  sendJson(response, { preview });
 }
 
 async function routeFeedback(userId, messageId, request, response) {
@@ -700,6 +720,8 @@ function authenticateRequest(request, response) {
 
 async function handleApi(url, request, response) {
   const messageMatch = url.pathname.match(/^\/api\/messages\/(.+?)(\/feedback)?$/);
+  const previewPrefix = "/api/messages/";
+  const previewSuffix = "/preview";
 
   // /api/status is allowed without auth so the web app can probe configuration
   // before sign-in. With a token it also returns the user's snapshot.
@@ -742,6 +764,15 @@ async function handleApi(url, request, response) {
   }
 
   if (request.method === "GET" && url.pathname === "/api/home") return routeHome(userId, response);
+  if (
+    request.method === "GET" &&
+    url.pathname.startsWith(previewPrefix) &&
+    url.pathname.endsWith(previewSuffix)
+  ) {
+    const encoded = url.pathname.slice(previewPrefix.length, -previewSuffix.length);
+    const ref = decodeURIComponent(encoded);
+    return routeMessagePreview(userId, ref, response);
+  }
   if (request.method === "GET" && url.pathname === "/api/messages") return routeMessages(userId, response);
   if (request.method === "GET" && url.pathname === "/api/today") return routeToday(userId, response);
   if (request.method === "POST" && url.pathname === "/api/sync/gmail") return routeSyncGmail(userId, response);

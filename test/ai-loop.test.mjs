@@ -87,10 +87,8 @@ test("AI loop creates instrumented decisions over synthetic mail", () => {
   assert.equal(run.output.briefing.prompt.id, "mail-briefing-prose");
   assert.equal(run.output.briefing.counts.recent, 7);
   assert.equal(run.output.briefing.counts.last7Days, 75);
-  assert.equal(run.output.briefing.callouts.length, 4);
-  assert.equal(run.output.briefing.callouts[0].messageId, "gmail:demo@example.com:message:demo-lease-review");
-  assert.equal(run.output.briefing.callouts[0].kind, "new_attention");
-  assert.equal(run.output.briefing.callouts[0].label, "Needs attention");
+  assert.equal(run.output.briefing.messageIds.includes("gmail:demo@example.com:message:demo-lease-review"), true);
+  assert.equal(run.output.briefing.messageIds.length >= 4, true);
   assert.equal(run.spans.some((span) => span.name === "model.mock_inference"), true);
   assert.equal(lease.category, "Needs Reply");
   assert.equal(lease.extracted.actions.includes("review"), true);
@@ -126,12 +124,11 @@ test("golden aggregate prompt records evaluate day summary and category breakdow
   assert.match(carryOverRun.output.briefing.text, /mostly calm/);
   assert.doesNotMatch(carryOverRun.output.briefing.text, /previous briefing|carry forward/i);
   assert.equal(carryOverRun.output.briefing.counts.carriedOver, 2);
-  assert.equal(carryOverRun.output.briefing.callouts.length, 4);
-  assert.equal(carryOverRun.output.briefing.callouts[0].kind, "carry_over");
-  assert.equal(carryOverRun.output.briefing.callouts[0].label, "Needs attention");
+  assert.equal(carryOverRun.output.briefing.messageIds.includes("gmail:demo@example.com:message:demo-lease-review"), true);
+  assert.equal(carryOverRun.output.briefing.messageIds.length >= 4, true);
 });
 
-test("iterative briefing selects new messages plus unresolved previous callouts", () => {
+test("iterative briefing selects new messages plus unresolved previous attention ids", () => {
   const baseTime = new Date("2026-05-03T16:00:00.000Z").getTime();
   const messages = buildDemoMessages(account, baseTime);
   const previousBriefing = {
@@ -140,18 +137,6 @@ test("iterative briefing selects new messages plus unresolved previous callouts"
     messageIds: [
       "gmail:demo@example.com:message:demo-school-form",
       "gmail:demo@example.com:message:golden-action-01-b",
-    ],
-    callouts: [
-      {
-        id: "callout-demo-school-form",
-        messageId: "gmail:demo@example.com:message:demo-school-form",
-        messageIds: ["gmail:demo@example.com:message:demo-school-form"],
-      },
-      {
-        id: "callout-golden-action-01-b",
-        messageId: "gmail:demo@example.com:message:golden-action-01-b",
-        messageIds: ["gmail:demo@example.com:message:golden-action-01-b"],
-      },
     ],
   };
   const feedback = [
@@ -250,17 +235,9 @@ test("done feedback removes a previous briefing item from carry-over attention",
   const messages = buildDemoMessages(account);
   const previousBriefing = {
     ...getGoldenPreviousBriefing(),
-    callouts: [
-      {
-        id: "callout-demo-lease-review",
-        messageId: "gmail:demo@example.com:message:demo-lease-review",
-        messageIds: ["gmail:demo@example.com:message:demo-lease-review"],
-      },
-      {
-        id: "callout-golden-action-01-b",
-        messageId: "gmail:demo@example.com:message:golden-action-01-b",
-        messageIds: ["gmail:demo@example.com:message:golden-action-01-b"],
-      },
+    messageIds: [
+      "gmail:demo@example.com:message:demo-lease-review",
+      "gmail:demo@example.com:message:golden-action-01-b",
     ],
   };
   const run = runAiLoopOnMessages({
@@ -277,15 +254,15 @@ test("done feedback removes a previous briefing item from carry-over attention",
     previousBriefing,
     trigger: "test",
   });
-  const calloutIds = run.output.briefing.callouts.map((callout) => callout.messageId);
+  const anchorIds = run.output.briefing.messageIds || [];
   const leaseDecision = run.output.decisions.find(
     (decision) => decision.messageId === "gmail:demo@example.com:message:demo-lease-review",
   );
 
   assert.equal(leaseDecision.needsReply, false);
   assert.equal(leaseDecision.feedback.addressed, true);
-  assert.equal(calloutIds.includes("gmail:demo@example.com:message:demo-lease-review"), false);
-  assert.equal(calloutIds[0], "gmail:demo@example.com:message:golden-action-01-b");
+  assert.equal(anchorIds.includes("gmail:demo@example.com:message:demo-lease-review"), false);
+  assert.equal(anchorIds.includes("gmail:demo@example.com:message:golden-action-01-b"), true);
   assert.equal(run.output.briefing.counts.carriedOver, 1);
 });
 
@@ -293,7 +270,7 @@ test("synthetic verification suite passes with the local AI loop", async () => {
   const run = await runSyntheticVerification({ persist: false });
 
   assert.equal(run.status, "passed");
-  assert.equal(run.summary.cases, 15);
+  assert.equal(run.summary.cases, 14);
   assert.equal(run.summary.failedCases, 0);
   assert.equal(run.score, 1);
 });

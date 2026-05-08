@@ -6,6 +6,7 @@ import type {
   FeedbackKind,
   DemoResetResponse,
   HomeResponse,
+  MessagePreviewResponse,
   MessageResponse,
   MessagesResponse,
   RecentClassificationsResponse,
@@ -62,6 +63,10 @@ export function getToday() {
 
 export function getMessage(id: string) {
   return apiFetch<MessageResponse>(`/api/messages/${encodeURIComponent(id)}`);
+}
+
+export function getMessagePreview(ref: string) {
+  return apiFetch<MessagePreviewResponse>(`/api/messages/${encodeURIComponent(ref)}/preview`);
 }
 
 export function saveFeedback(id: string, kind: FeedbackKind) {

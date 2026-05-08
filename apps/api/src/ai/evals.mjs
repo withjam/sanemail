@@ -37,10 +37,10 @@ const promptEvalDefinitions = [
   },
   {
     id: "mail-briefing-golden-v1",
-    promptIds: ["mail-briefing-prose", "mail-briefing-structurize"],
+    promptIds: ["mail-briefing-prose"],
     title: "Inbox briefing summary",
     evaluator: "golden-records",
-    checks: ["required phrases", "forbidden phrases", "callout links", "counts", "carry-over"],
+    checks: ["required phrases", "forbidden phrases", "counts", "carry-over", "message ids"],
   },
   {
     id: "mail-briefing-reconcile-contract-v1",

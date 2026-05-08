@@ -16,10 +16,7 @@ test("drives the local demo mailbox through Today, detail, feedback, and reset",
   await expect(page.getByRole("heading", { name: "Today" })).toBeVisible();
   await expect(page.getByTestId("inbox-briefing")).toContainText("Your inbox is mostly calm");
   await expect(page.getByTestId("inbox-briefing")).not.toContainText(/visible messages|automated updates|previous briefing|carry forward/i);
-  await expect(page.getByTestId("briefing-callout-new_attention")).toHaveCount(4);
-  await expect(page.getByTestId("briefing-callout-new_attention").first()).toContainText("Can you review the lease renewal today");
-  await expect(page.getByTestId("briefing-callout-new_attention").first()).toContainText("Need attention");
-  await expect(page.getByRole("link", { name: /Can you review the lease renewal today/ })).toBeVisible();
+  await expect(page.getByTestId("briefing-message-link").first()).toContainText(/lease renewal|review the lease/i);
   await expect(page.getByText("Verify your account immediately")).not.toBeVisible();
 
   await page.getByTestId("home-tab-needsReply").click();

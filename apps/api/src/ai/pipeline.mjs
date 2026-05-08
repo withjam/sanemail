@@ -17,7 +17,6 @@ import {
   buildClassificationMessages,
   classifyWithOllama,
   generateBriefingProseWithOllama,
-  generateBriefingWithOllama,
 } from "./ollama.mjs";
 import { traceAiRun } from "./phoenix.mjs";
 import { getPromptSnapshots, hashValue, renderPrompt } from "./prompts.mjs";
@@ -35,44 +34,6 @@ function sentMailContextForReconciliation(store, account, limit = 20) {
       to: message.to || message.headers?.to || "",
       snippet: message.snippet || "",
     }));
-}
-
-function proseFallbackFromBriefing(briefing) {
-  if (!briefing) return "";
-  const n = briefing.narrative;
-  if (n && typeof n === "object") {
-    return [n.status, n.needToKnow, n.mightBeMissing, n.needsAttention].filter(Boolean).join("\n\n");
-  }
-  return String(briefing.text || "").trim();
-}
-
-function briefingAnchorsForStructurize(fallbackBriefing) {
-  if (!fallbackBriefing) {
-    return JSON.stringify({ counts: {}, messageIds: [], callouts: [] }, null, 2);
-  }
-  return JSON.stringify(
-    {
-      counts: fallbackBriefing.counts || {},
-      messageIds: fallbackBriefing.messageIds || [],
-      callouts: (fallbackBriefing.callouts || []).map((c) => ({
-        messageId: c.messageId,
-        kind: c.kind,
-        label: c.label,
-        title: c.title,
-        body: c.body,
-        deliveredAt: c.deliveredAt,
-      })),
-    },
-    null,
-    2,
-  );
-}
-
-function renderBriefingStructurizePrompt(prose, fallbackBriefing) {
-  return renderPrompt("mail-briefing-structurize", {
-    prose,
-    anchors: briefingAnchorsForStructurize(fallbackBriefing),
-  });
 }
 
 const actionPatterns = [
@@ -513,13 +474,14 @@ function idsFor(decisions, limit = 8) {
 }
 
 function idsFromPreviousBriefing(previousBriefing) {
-  return new Set([
-    ...((previousBriefing?.callouts || []).flatMap((callout) => [
-      callout.messageId,
-      ...(callout.messageIds || []),
-    ])),
-    ...(previousBriefing?.messageIds || []),
-  ].filter(Boolean));
+  return new Set(
+    [
+      ...(previousBriefing?.messageIds || []),
+      ...(previousBriefing?.carryOver?.messageIds || []),
+      ...(previousBriefing?.memory?.carryOverMessageIds || []),
+      ...(previousBriefing?.memory?.unresolvedPreviousMessageIds || []),
+    ].filter(Boolean),
+  );
 }
 
 function previousBriefingTimestamp(previousBriefing) {
@@ -679,15 +641,16 @@ function calloutBody(decision) {
   return `${sender} appears to need a ${action}.${deadlineText}`;
 }
 
-function buildBriefingCallouts({ needsReplyLast7, carryOver, previousBriefing }) {
+/** Up to four attention items for prose context (not persisted as callouts). */
+function buildAttentionHighlights({ needsReplyLast7, carryOver, previousBriefing }) {
   const previousIds = idsFromPreviousBriefing(previousBriefing);
-  const callouts = [];
+  const highlights = [];
   const used = new Set();
 
   for (const decision of carryOver) {
     used.add(decision.messageId);
-    callouts.push({
-      id: `callout-${decision.messageId}`,
+    highlights.push({
+      id: `attention-${decision.messageId}`,
       kind: "carry_over",
       label: "Needs attention",
       title: decision.subject.replace(/[?.!]+$/, ""),
@@ -702,29 +665,27 @@ function buildBriefingCallouts({ needsReplyLast7, carryOver, previousBriefing })
   for (const decision of sortForBriefing(needsReplyLast7)) {
     if (used.has(decision.messageId)) continue;
     const seenBefore = previousIds.has(decision.messageId);
-    callouts.push({
-      id: `callout-${decision.messageId}`,
+    highlights.push({
+      id: `attention-${decision.messageId}`,
       kind: seenBefore ? "attention" : "new_attention",
       label: "Needs attention",
       title: decision.subject.replace(/[?.!]+$/, ""),
       body: calloutBody(decision),
       messageId: decision.messageId,
       messageIds: [decision.messageId],
-      priority: callouts.length + 1,
+      priority: highlights.length + 1,
       deliveredAt: decisionDeliveredAt(decision),
     });
     used.add(decision.messageId);
-    if (callouts.length >= 4) break;
+    if (highlights.length >= 4) break;
   }
 
-  return callouts.slice(0, 4);
+  return highlights.slice(0, 4);
 }
 
-function buildBriefingNarrative({
-  callouts,
-}) {
-  const topTitles = callouts.map((callout) => callout.title);
-  const status = callouts.length
+function buildBriefingNarrative({ attentionHighlights }) {
+  const topTitles = attentionHighlights.map((item) => item.title);
+  const status = attentionHighlights.length
     ? `Your inbox is mostly calm. I would open ${joinReadable(topTitles)} first; those are the items most likely to need your attention right now.`
     : `Your inbox looks calm right now. I do not see anything that needs your attention before you are ready to scan the rest.`;
 
@@ -764,9 +725,9 @@ function buildBriefingState(decisions = [], previousBriefing = null, memory = nu
   const upcomingSubjects = summarizeSubjects(upcoming, () => true, 2);
   const recentSubjects = summarizeSubjects(recent, () => true, 2);
   const carryOverSubjects = carryOver.map((decision) => decision.subject.replace(/[?.!]+$/, ""));
-  const callouts = buildBriefingCallouts({ needsReplyLast7, carryOver, previousBriefing });
+  const attentionHighlights = buildAttentionHighlights({ needsReplyLast7, carryOver, previousBriefing });
   const narrative = buildBriefingNarrative({
-    callouts,
+    attentionHighlights,
   });
 
   return {
@@ -785,7 +746,7 @@ function buildBriefingState(decisions = [], previousBriefing = null, memory = nu
     upcomingSubjects,
     recentSubjects,
     carryOverSubjects,
-    callouts,
+    attentionHighlights,
     narrative,
     memory,
   };
@@ -832,7 +793,7 @@ function briefingContextFromState(state, previousBriefing = null) {
 
   return {
     instructionContext:
-      "Use this as private context for deciding what matters. The user should only see the conversational summary and linked callouts.",
+      "Use this as private context for deciding what matters. The user should only see the conversational summary and inline message source links.",
     recencyPolicy:
       "Prefer recent messages, include items from the past 7 days when still relevant, and use prior briefing items only to avoid neglecting important reminders.",
     processingSummary: {
@@ -868,14 +829,14 @@ function briefingContextFromState(state, previousBriefing = null) {
       unresolvedPreviousMessageIds: state.memory?.unresolvedPreviousMessageIds || [],
       resolvedPreviousMessageIds: state.memory?.resolvedPreviousMessageIds || [],
     },
-    candidateCallouts: state.callouts.map((callout) => ({
-      kind: callout.kind,
-      label: callout.label,
-      title: callout.title,
-      body: callout.body,
-      messageId: callout.messageId,
-      messageIds: callout.messageIds,
-      deliveredAt: callout.deliveredAt,
+    candidateAttention: state.attentionHighlights.map((item) => ({
+      kind: item.kind,
+      label: item.label,
+      title: item.title,
+      body: item.body,
+      messageId: item.messageId,
+      messageIds: item.messageIds,
+      deliveredAt: item.deliveredAt,
     })),
     recentMessages: recentMessages.items,
     attentionCandidates: attentionCandidates.items,
@@ -888,11 +849,6 @@ function briefingContextFromState(state, previousBriefing = null) {
           generatedAt: previousBriefing.generatedAt || previousBriefing.createdAt || null,
           text: previousBriefing.text || "",
           messageIds: previousBriefing.messageIds || [],
-          callouts: (previousBriefing.callouts || []).map((callout) => ({
-            title: callout.title,
-            messageId: callout.messageId,
-            messageIds: callout.messageIds || [],
-          })),
           carryOverMessageIds: previousBriefing.carryOver?.messageIds || [],
         }
       : null,
@@ -907,8 +863,8 @@ function renderBriefingPromptFromState(state, previousBriefing = null) {
     needsReply: state.replySubjects,
     upcoming: state.upcomingSubjects,
     carryOver: state.carryOverSubjects,
-    callouts: state.callouts.map(
-      (callout) => `${callout.label}: ${callout.title} [messageId:${callout.messageId}] ${callout.body}`,
+    attentionHighlights: state.attentionHighlights.map(
+      (item) => `${item.label}: ${item.title} [messageId:${item.messageId}] ${item.body}`,
     ),
     informational: state.automated.map((decision) => decision.subject).slice(0, 3),
     hidden: state.hidden.map((decision) => decision.subject).slice(0, 3),
@@ -925,8 +881,8 @@ function renderBriefingPromptForDecisions(decisions = [], previousBriefing = nul
     needsReply: state.replySubjects,
     upcoming: state.upcomingSubjects,
     carryOver: state.carryOverSubjects,
-    callouts: state.callouts.map(
-      (callout) => `${callout.label}: ${callout.title} [messageId:${callout.messageId}] ${callout.body}`,
+    attentionHighlights: state.attentionHighlights.map(
+      (item) => `${item.label}: ${item.title} [messageId:${item.messageId}] ${item.body}`,
     ),
     informational: state.automated.map((decision) => decision.subject).slice(0, 3),
     hidden: state.hidden.map((decision) => decision.subject).slice(0, 3),
@@ -953,7 +909,7 @@ export function buildInboxBriefing(decisions = [], { previousBriefing = null, me
     addressed,
     carryOver,
     carryOverSubjects,
-    callouts,
+    attentionHighlights,
     narrative,
   } = state;
 
@@ -991,10 +947,22 @@ export function buildInboxBriefing(decisions = [], { previousBriefing = null, me
     resolvedPreviousMessageIds: memory?.resolvedPreviousMessageIds || [],
   };
 
+  const mergedMessageIds = (() => {
+    const attentionIds = attentionHighlights.map((h) => h.messageId);
+    const topVisible = idsFor(visible, 8);
+    const seen = new Set();
+    const out = [];
+    for (const id of [...attentionIds, ...topVisible]) {
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+    return out.slice(0, 16);
+  })();
+
   return {
     text,
     narrative,
-    callouts,
     generatedAt,
     source: "ai-loop",
     model: "deterministic-briefing-v0",
@@ -1017,7 +985,7 @@ export function buildInboxBriefing(decisions = [], { previousBriefing = null, me
       hidden: hidden.length,
       carriedOver: carryOver.length,
     },
-    messageIds: idsFor(visible, 8),
+    messageIds: mergedMessageIds,
     memory: memoryBlock,
     carryOver: {
       previousBriefingId: previousBriefing?.id || null,
@@ -1182,22 +1150,6 @@ export function runAiLoopOnMessages({
   };
 }
 
-function fallbackBriefingAfterProviderError(fallback) {
-  const generatedAt = nowIso();
-  return {
-    ...fallback,
-    generatedAt,
-    memory: fallback?.memory
-      ? {
-          ...fallback.memory,
-          producedAt: generatedAt,
-        }
-      : fallback?.memory,
-    source: "ai-loop-provider-fallback",
-    model: fallback?.model || "deterministic-briefing-v0",
-  };
-}
-
 async function runOllamaBriefProseCall({ run, config, prompt, proseFallback }) {
   const started = Date.now();
   const inputHash = promptInputHash(prompt);
@@ -1331,95 +1283,6 @@ async function runOllamaBriefReconcileProseCall({ run, config, prompt, proseFall
   }
 }
 
-async function runOllamaBriefStructurizeCall({ run, config, prompt, fallback }) {
-  const started = Date.now();
-  const inputHash = promptInputHash(prompt);
-  try {
-    const result = await generateBriefingWithOllama({
-      config,
-      prompt,
-      fallback,
-    });
-    const status = result.meta.fallback ? "fallback" : "succeeded";
-    recordLlmCall(run, {
-      pipeline: "daily_brief",
-      stage: "brief_structurize",
-      provider: "ollama",
-      status,
-      model: result.meta.model || config.ollama.model,
-      requestedModel: config.ollama.model,
-      temperature: 0,
-      promptId: prompt.id,
-      promptVersion: prompt.version,
-      promptHash: prompt.hash,
-      contractHash: prompt.contractHash,
-      inputHash,
-      outputHash: outputHash(result.briefing),
-      inputMessageCount: 0,
-      outputMessageCount: result.briefing?.messageIds?.length || 0,
-      attempts: result.meta.attempts,
-      latencyMs: result.meta.latencyMs,
-      promptEvalCount: result.meta.promptEvalCount,
-      evalCount: result.meta.evalCount,
-      thinkingChars: result.meta.thinkingChars,
-      fallback: Boolean(result.meta.fallback),
-      fallbackReason: result.meta.fallbackReason || null,
-      ...llmTracePayloadFromPrompt(config, prompt, result.briefing),
-    });
-    return result;
-  } catch (error) {
-    const latencyMs = Date.now() - started;
-    const message = publicError(error);
-    const briefing = fallbackBriefingAfterProviderError(fallback);
-    recordLlmCall(run, {
-      pipeline: "daily_brief",
-      stage: "brief_structurize",
-      provider: "ollama",
-      status: "fallback",
-      model: config.ollama.model,
-      requestedModel: config.ollama.model,
-      temperature: 0,
-      promptId: prompt.id,
-      promptVersion: prompt.version,
-      promptHash: prompt.hash,
-      contractHash: prompt.contractHash,
-      inputHash,
-      outputHash: outputHash(briefing),
-      inputMessageCount: 0,
-      outputMessageCount: briefing?.messageIds?.length || 0,
-      attempts: Math.max(1, Number(config.ai.maxRetries || 0) + 1),
-      latencyMs,
-      promptEvalCount: 0,
-      evalCount: 0,
-      thinkingChars: 0,
-      fallback: true,
-      fallbackReason: "provider_error",
-      error: message,
-      ...llmTracePayloadFromPrompt(config, prompt, briefing),
-    });
-    console.warn("[ollama briefing structurize provider fallback]", {
-      reason: "provider_error",
-      error: message,
-      requestModel: config.ollama.model,
-    });
-    return {
-      briefing,
-      meta: {
-        latencyMs,
-        model: config.ollama.model,
-        thinkingChars: 0,
-        promptEvalCount: 0,
-        evalCount: 0,
-        totalDurationNs: 0,
-        attempts: Math.max(1, Number(config.ai.maxRetries || 0) + 1),
-        fallback: true,
-        fallbackReason: "provider_error",
-        error: message,
-      },
-    };
-  }
-}
-
 async function applyOllamaProvider(
   run,
   scopedMessages,
@@ -1549,7 +1412,7 @@ async function applyOllamaProvider(
   let briefingResponseModel = null;
   if (generateBriefing && decisions.length) {
     const deterministicBriefing = run.output.briefing;
-    const proseFallback = proseFallbackFromBriefing(deterministicBriefing);
+    const proseFallback = String(deterministicBriefing?.text || "").trim();
     const briefingStart = Date.now();
     const briefingPrompt = renderBriefingPromptForDecisions(decisions, previousBriefing, memory);
     aiDebugLog("ollama briefing context", {
@@ -1569,6 +1432,8 @@ async function applyOllamaProvider(
     modelMetrics.briefingThinkingChars += prosePass.meta.thinkingChars;
     briefingResponseModel = prosePass.meta.model || null;
     let proseDraft = prosePass.text;
+    let finalPrompt = briefingPrompt;
+    let lastPassFallback = Boolean(prosePass.meta.fallback);
     run.spans.push(
       createSpan("model.ollama_briefing_prose", briefingStart, {
         pipeline: "daily_brief",
@@ -1593,6 +1458,8 @@ async function applyOllamaProvider(
         proseFallback: proseDraft,
       });
       proseDraft = reconcilePass.text;
+      finalPrompt = reconcilePrompt;
+      lastPassFallback = Boolean(reconcilePass.meta.fallback);
       modelMetrics.briefingPromptEvalCount += reconcilePass.meta.promptEvalCount || 0;
       modelMetrics.briefingEvalCount += reconcilePass.meta.evalCount || 0;
       modelMetrics.briefingThinkingChars += reconcilePass.meta.thinkingChars || 0;
@@ -1609,40 +1476,26 @@ async function applyOllamaProvider(
       );
     }
 
-    const structStart = Date.now();
-    const structPrompt = renderBriefingStructurizePrompt(proseDraft, deterministicBriefing);
-    const structPass = await runOllamaBriefStructurizeCall({
-      run,
-      config,
-      prompt: structPrompt,
-      fallback: deterministicBriefing,
-    });
-    modelMetrics.briefingPromptEvalCount += structPass.meta.promptEvalCount;
-    modelMetrics.briefingEvalCount += structPass.meta.evalCount;
-    modelMetrics.briefingThinkingChars += structPass.meta.thinkingChars;
+    // Display + memory text both come from the (post-reconcile) prose. Counts,
+    // narrative, messageIds, memory, and carryOver remain deterministic from
+    // buildInboxBriefing — no second LLM pass needed to stamp them.
+    const finalText = typeof proseDraft === "string" && proseDraft.trim()
+      ? proseDraft
+      : deterministicBriefing.text;
     run.output.briefing = {
-      ...structPass.briefing,
+      ...deterministicBriefing,
+      text: finalText,
+      source: lastPassFallback ? "ai-loop-fallback" : "ollama",
+      model: briefingResponseModel || deterministicBriefing.model,
       prompt: {
-        id: structPrompt.id,
-        version: structPrompt.version,
-        hash: structPrompt.hash,
-        promptHash: structPrompt.promptHash,
-        modelBindingHash: structPrompt.modelBindingHash,
-        contractHash: structPrompt.contractHash,
+        id: finalPrompt.id,
+        version: finalPrompt.version,
+        hash: finalPrompt.hash,
+        promptHash: finalPrompt.promptHash,
+        modelBindingHash: finalPrompt.modelBindingHash,
+        contractHash: finalPrompt.contractHash,
       },
     };
-    briefingResponseModel = structPass.meta.model || briefingResponseModel;
-    run.spans.push(
-      createSpan("model.ollama_briefing_structurize", structStart, {
-        pipeline: "daily_brief",
-        status: structPass.meta.fallback ? "degraded" : "ok",
-        model: structPass.meta.model,
-        attempts: structPass.meta.attempts,
-        fallback: Boolean(structPass.meta.fallback),
-        fallbackReason: structPass.meta.fallbackReason || null,
-        calloutCount: structPass.briefing.callouts?.length || 0,
-      }),
-    );
   }
   run.provider = {
     name: "ollama",
@@ -1654,7 +1507,6 @@ async function applyOllamaProvider(
     briefingModel: config.ollama.model,
     classificationModel: requestedClassificationModel,
     temperature: config.ollama.temperature,
-    briefingStructTemperature: 0,
     think: config.ollama.think,
     host: config.ollama.host,
     classifyMessages,
@@ -1808,12 +1660,6 @@ export async function runAiLoop({
             temperature: config.ollama.temperature,
             think: config.ollama.think,
           },
-          "mail-briefing-structurize": {
-            provider: "ollama",
-            model: config.ollama.model,
-            temperature: 0,
-            think: false,
-          },
         }
       : {}),
   });
@@ -1850,7 +1696,7 @@ export async function runAiLoop({
     reportedModel: run.provider.model,
     latencyMs: Date.now() - ollamaStart,
     decisions: run.output.decisions.length,
-    briefCallouts: run.output.briefing?.callouts?.length || 0,
+    briefMessageIds: run.output.briefing?.messageIds?.length || 0,
   });
   run.observability = await traceAiRun(run);
   await recordAiRun(run);

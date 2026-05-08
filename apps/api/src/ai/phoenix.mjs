@@ -181,7 +181,6 @@ function runAttributes(run) {
     "llm.model_name": run.provider.model,
     "llm.invocation_parameters": JSON.stringify({
       temperature: run.provider.temperature,
-      briefingStructTemperature: run.provider.briefingStructTemperature ?? 0,
       think: run.provider.think,
       briefingModel: run.provider.briefingModel,
       classificationModel: run.provider.classificationModel,
@@ -214,7 +213,6 @@ async function traceModelSummary(run) {
       modelName: run.provider.model,
       invocationParameters: {
         temperature: run.provider.temperature,
-        briefingStructTemperature: run.provider.briefingStructTemperature ?? 0,
       },
       tokenCount: {
         prompt: run.metrics.estimatedPromptTokens,
@@ -304,9 +302,6 @@ async function traceLlmCalls(run) {
       attempts: call.attempts,
       fallback: Boolean(call.fallback),
     };
-    if (call.stage === "brief_structurize") {
-      invocationParameters.briefingStructTemperature = 0;
-    }
     await withSpan(`sanemail.llm.${call.pipeline}`, {
       ...getLLMAttributes({
         provider: call.provider,
@@ -323,7 +318,6 @@ async function traceLlmCalls(run) {
       "sanemail.run_id": run.id,
       "sanemail.llm_call_id": call.id,
       "sanemail.llm.temperature": temperature,
-      ...(call.stage === "brief_structurize" ? { "sanemail.llm.briefing_struct_temperature": 0 } : {}),
       "sanemail.llm.content_redacted": !allowSensitive,
       "sanemail.pipeline": call.pipeline,
       "sanemail.stage": call.stage,
@@ -393,7 +387,6 @@ export async function traceVerificationRun(run) {
     "llm.model_name": run.provider.model,
     "llm.invocation_parameters": JSON.stringify({
       temperature: run.provider.temperature,
-      briefingStructTemperature: run.provider.briefingStructTemperature ?? 0,
       think: run.provider.think,
       briefingModel: run.provider.briefingModel,
       classificationModel: run.provider.classificationModel,
