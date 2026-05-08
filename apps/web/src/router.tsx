@@ -188,7 +188,7 @@ function BriefingMessageRef({
   const showTip = citeHover && Boolean(preview);
 
   const citeIcon = (
-    <BookOpen className="briefing-ref-icon" size={12} strokeWidth={2.25} aria-hidden />
+    <BookOpen className="briefing-ref-icon" size={16} strokeWidth={2} aria-hidden />
   );
 
   const hovercard =
@@ -215,7 +215,7 @@ function BriefingMessageRef({
         >
           {linkText}
         </Link>
-        <sup className="briefing-ref-sup">
+        <span className="briefing-ref-mark">
           <span
             className="briefing-ref-cite-wrap"
             onMouseEnter={() => setCiteHover(true)}
@@ -232,7 +232,7 @@ function BriefingMessageRef({
             </Link>
             {hovercard}
           </span>
-        </sup>
+        </span>
       </span>
     );
   }
@@ -250,7 +250,7 @@ function BriefingMessageRef({
       >
         {linkText}
       </span>
-      <sup className="briefing-ref-sup">
+      <span className="briefing-ref-mark">
         <span
           className={`briefing-ref-cite-wrap ${preview ? "has-preview" : ""}`}
           onMouseEnter={() => setCiteHover(true)}
@@ -261,7 +261,7 @@ function BriefingMessageRef({
           </span>
           {hovercard}
         </span>
-      </sup>
+      </span>
     </span>
   );
 }

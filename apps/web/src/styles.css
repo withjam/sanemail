@@ -380,18 +380,17 @@ textarea {
   cursor: pointer;
 }
 
-.briefing-ref-sup {
-  font-size: 0.72em;
-  line-height: 0;
-  vertical-align: super;
-  font-weight: normal;
-  margin-inline-start: 0.06em;
+.briefing-ref-mark {
+  display: inline-flex;
+  align-items: center;
+  font-weight: inherit;
+  margin-inline-start: 0.18em;
 }
 
 .briefing-ref-cite-wrap {
   position: relative;
-  display: inline-block;
-  vertical-align: baseline;
+  display: inline-flex;
+  align-items: center;
   line-height: 1;
 }
 
@@ -399,29 +398,29 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--muted);
+  color: var(--accent-strong, #1d4ed8);
   text-decoration: none;
   border-radius: 3px;
   padding: 1px;
-  vertical-align: middle;
   transition: color 0.12s ease, background-color 0.12s ease;
 }
 
 .briefing-ref-cite:hover {
-  color: var(--accent, #2563eb);
+  color: var(--accent-strong, #1d4ed8);
   background: var(--surface-2);
 }
 
 .briefing-ref-cite-static {
   cursor: default;
   pointer-events: none;
-  opacity: 0.55;
+  color: var(--accent-strong, #1d4ed8);
+  opacity: 0.7;
 }
 
 .briefing-ref-cite-wrap.has-preview .briefing-ref-cite-static {
   pointer-events: auto;
   cursor: help;
-  opacity: 0.85;
+  opacity: 1;
 }
 
 .briefing-ref-icon {
