@@ -97,6 +97,31 @@ function pickPrimaryAccount(store) {
   return real || accounts[0] || null;
 }
 
+function buildSourceCounts(store) {
+  const accounts = store?.accounts || [];
+  const messageCounts = new Map();
+  const threadCounts = new Map();
+  for (const message of store?.messages || []) {
+    const accountId = message?.accountId;
+    if (!accountId) continue;
+    messageCounts.set(accountId, (messageCounts.get(accountId) || 0) + 1);
+  }
+  for (const thread of store?.threads || []) {
+    const accountId = thread?.accountId;
+    if (!accountId) continue;
+    threadCounts.set(accountId, (threadCounts.get(accountId) || 0) + 1);
+  }
+  return accounts
+    .filter(Boolean)
+    .map((account) => ({
+      sourceConnectionId: account.id,
+      provider: account.provider,
+      email: account.email || "",
+      syncedMessages: messageCounts.get(account.id) || 0,
+      syncedThreads: threadCounts.get(account.id) || 0,
+    }));
+}
+
 function getMessageList(store, account) {
   return getClassifiedMessages(store, account)
     .filter((message) => !isSentByMailbox(message, account))
@@ -249,6 +274,8 @@ async function routeStatus(userId, response) {
   if (!userId) {
     sendJson(response, {
       account: null,
+      accounts: [],
+      sourceCounts: [],
       authenticated: false,
       configMissing: validateGoogleConfig(config),
       securityMissing: validateSecurityConfig(config),
@@ -262,12 +289,16 @@ async function routeStatus(userId, response) {
 
   const store = await readStoreFor(userId);
   const account = pickPrimaryAccount(store);
+  const accounts = (store.accounts || []).map(publicAccount).filter(Boolean);
+  const sourceCounts = buildSourceCounts(store);
   const messages = getMessageList(store, account);
   const today = getTodayMessages(store, account);
   const connectedProviders = [...new Set((store.accounts || []).map((a) => a?.provider).filter(Boolean))];
 
   sendJson(response, {
     account: publicAccount(account),
+    accounts,
+    sourceCounts,
     authenticated: true,
     configMissing: validateGoogleConfig(config),
     securityMissing: validateSecurityConfig(config),
@@ -407,9 +438,20 @@ async function regenerateBriefAfterSync(userId, trigger) {
   }
 }
 
-async function routeSyncGmail(userId, response) {
+function pickGmailAccount(store, sourceConnectionId) {
+  const accounts = store?.accounts || [];
+  if (sourceConnectionId) {
+    return accounts.find((account) => account?.id === sourceConnectionId && account?.provider === "gmail") || null;
+  }
+  return accounts.find((account) => account?.provider === "gmail") || null;
+}
+
+async function routeSyncGmail(userId, request, response) {
+  const body = await parseJsonBody(request);
+  const sourceConnectionId = body?.sourceConnectionId ? String(body.sourceConnectionId) : null;
   const { account, result } = await syncSourceConnection({
     userId,
+    ...(sourceConnectionId ? { sourceConnectionId } : {}),
     provider: "gmail",
     trigger: "manual",
   });
@@ -418,9 +460,11 @@ async function routeSyncGmail(userId, response) {
   sendJson(response, { ok: true, result, briefRun, ...(queued ? { queued } : {}) });
 }
 
-async function routeQueueGmailSync(userId, response) {
+async function routeQueueGmailSync(userId, request, response) {
+  const body = await parseJsonBody(request);
+  const sourceConnectionId = body?.sourceConnectionId ? String(body.sourceConnectionId) : null;
   const store = await readStoreFor(userId);
-  const gmailAccount = (store.accounts || []).find((account) => account?.provider === "gmail") || null;
+  const gmailAccount = pickGmailAccount(store, sourceConnectionId);
   if (!gmailAccount) {
     sendJson(response, { error: "gmail_not_connected", message: "No Gmail account is connected." }, 400);
     return;
@@ -437,9 +481,11 @@ async function routeQueueGmailSync(userId, response) {
   sendJson(response, { ok: true, queued });
 }
 
-async function routeQueueGmailBackfill(userId, response) {
+async function routeQueueGmailBackfill(userId, request, response) {
+  const body = await parseJsonBody(request);
+  const sourceConnectionId = body?.sourceConnectionId ? String(body.sourceConnectionId) : null;
   const store = await readStoreFor(userId);
-  const gmailAccount = (store.accounts || []).find((account) => account?.provider === "gmail") || null;
+  const gmailAccount = pickGmailAccount(store, sourceConnectionId);
   if (!gmailAccount) {
     sendJson(response, { error: "gmail_not_connected", message: "No Gmail account is connected." }, 400);
     return;
@@ -456,9 +502,11 @@ async function routeQueueGmailBackfill(userId, response) {
   sendJson(response, { ok: true, queued });
 }
 
-async function routeDirectGmailIngest(userId, response, { cursorHint, trigger }) {
+async function routeDirectGmailIngest(userId, request, response, { cursorHint, trigger }) {
+  const body = await parseJsonBody(request);
+  const sourceConnectionId = body?.sourceConnectionId ? String(body.sourceConnectionId) : null;
   const store = await readStoreFor(userId);
-  const gmailAccount = (store.accounts || []).find((account) => account?.provider === "gmail") || null;
+  const gmailAccount = pickGmailAccount(store, sourceConnectionId);
   if (!gmailAccount) {
     sendJson(response, { error: "gmail_not_connected", message: "No Gmail account is connected." }, 400);
     return;
@@ -775,15 +823,15 @@ async function handleApi(url, request, response) {
   }
   if (request.method === "GET" && url.pathname === "/api/messages") return routeMessages(userId, response);
   if (request.method === "GET" && url.pathname === "/api/today") return routeToday(userId, response);
-  if (request.method === "POST" && url.pathname === "/api/sync/gmail") return routeSyncGmail(userId, response);
+  if (request.method === "POST" && url.pathname === "/api/sync/gmail") return routeSyncGmail(userId, request, response);
   if (request.method === "POST" && url.pathname === "/api/sync/mock") return routeSyncMock(userId, response);
-  if (request.method === "POST" && url.pathname === "/api/queue/sync/gmail") return routeQueueGmailSync(userId, response);
-  if (request.method === "POST" && url.pathname === "/api/queue/backfill/gmail") return routeQueueGmailBackfill(userId, response);
+  if (request.method === "POST" && url.pathname === "/api/queue/sync/gmail") return routeQueueGmailSync(userId, request, response);
+  if (request.method === "POST" && url.pathname === "/api/queue/backfill/gmail") return routeQueueGmailBackfill(userId, request, response);
   if (request.method === "POST" && url.pathname === "/api/ingest/gmail/next") {
-    return routeDirectGmailIngest(userId, response, { cursorHint: "latest", trigger: "manual" });
+    return routeDirectGmailIngest(userId, request, response, { cursorHint: "latest", trigger: "manual" });
   }
   if (request.method === "POST" && url.pathname === "/api/ingest/gmail/backfill") {
-    return routeDirectGmailIngest(userId, response, { cursorHint: "backfill_older", trigger: "backfill" });
+    return routeDirectGmailIngest(userId, request, response, { cursorHint: "backfill_older", trigger: "backfill" });
   }
   if (request.method === "POST" && url.pathname === "/api/disconnect") return routeDisconnect(userId, response);
   if (request.method === "POST" && url.pathname === "/api/demo/reset") return routeDemoReset(userId, response);

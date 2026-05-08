@@ -494,18 +494,18 @@ function SidebarSourcesSummary({ status }: { status?: StatusResponse }) {
       </div>
     );
   }
-  const sources = resolveSources(status);
-  const connectedSources = sources.filter((source) => source.connected);
-  const sourceLabel = connectedSources.length === 1 ? "source" : "sources";
+  const accounts = Array.isArray(status.accounts) ? status.accounts : status.account ? [status.account] : [];
+  const connected = accounts.filter(Boolean);
+  const sourceLabel = connected.length === 1 ? "source" : "sources";
   return (
     <div className="account-line" data-testid="sidebar-sources">
-      <strong>{connectedSources.length} {sourceLabel} connected</strong>
+      <strong>{connected.length} {sourceLabel} connected</strong>
       <ul className="sidebar-source-list">
-        {connectedSources.map((source) => (
-          <li key={source.entry.key} className="sidebar-source-row">
+        {connected.map((account) => (
+          <li key={account.id} className="sidebar-source-row">
             <CheckCircle2 size={12} />
-            <span>{source.entry.label}</span>
-            {source.email && <span className="muted">· {source.email}</span>}
+            <span>{account.provider}</span>
+            {account.email && <span className="muted">· {account.email}</span>}
           </li>
         ))}
       </ul>
@@ -519,7 +519,7 @@ function SidebarSourcesSummary({ status }: { status?: StatusResponse }) {
 
 function SyncButton({ status }: { status?: StatusResponse }) {
   const syncMutation = useMutation({
-    mutationFn: syncGmail,
+    mutationFn: () => syncGmail(),
     onSuccess: () => {
       void queryClient.invalidateQueries();
     },
@@ -1494,20 +1494,39 @@ type ResolvedSource = {
   email: string;
 };
 
+type SourceCountsMap = Map<string, { syncedMessages: number; syncedThreads?: number }>;
+
+function buildSourceCountsMap(status: StatusResponse): SourceCountsMap {
+  const map: SourceCountsMap = new Map();
+  for (const item of status.sourceCounts || []) {
+    if (!item?.sourceConnectionId) continue;
+    map.set(item.sourceConnectionId, {
+      syncedMessages: item.syncedMessages ?? 0,
+      syncedThreads: item.syncedThreads ?? 0,
+    });
+  }
+  return map;
+}
+
 function resolveSources(status: StatusResponse): ResolvedSource[] {
-  const account = status.account;
-  const accountIsDemo = Boolean(account?.demo) || account?.provider === "mock";
+  const accounts = Array.isArray(status.accounts)
+    ? status.accounts
+    : status.account
+      ? [status.account]
+      : [];
+  const demoAccount = accounts.find((a) => a?.provider === "mock" || a?.demo) || null;
 
   return SOURCE_CATALOG.map((entry) => {
     if (entry.key === "synthetic-local-dev") {
       return {
         entry,
-        connected: accountIsDemo,
-        account: accountIsDemo ? account : null,
-        email: account && accountIsDemo ? account.email : "",
+        connected: Boolean(demoAccount),
+        account: demoAccount,
+        email: demoAccount?.email || "",
       };
     }
-    const matched = account && !accountIsDemo && account.provider === entry.provider ? account : null;
+    const matched =
+      accounts.find((account) => account && !account.demo && account.provider === entry.provider) || null;
     return {
       entry,
       connected: Boolean(matched),
@@ -1519,16 +1538,37 @@ function resolveSources(status: StatusResponse): ResolvedSource[] {
 
 function SettingsRoute() {
   const status = useStatus();
+  const [pendingSyncSourceId, setPendingSyncSourceId] = useState<string | null>(null);
+  const [pendingIngestSourceId, setPendingIngestSourceId] = useState<string | null>(null);
+  const [pendingBackfillSourceId, setPendingBackfillSourceId] = useState<string | null>(null);
   const syncGmailMutation = useMutation({
-    mutationFn: syncGmail,
+    mutationFn: (sourceConnectionId?: string) => syncGmail(sourceConnectionId),
+    onMutate: (sourceConnectionId?: string) => {
+      setPendingSyncSourceId(sourceConnectionId || null);
+    },
+    onSettled: () => {
+      setPendingSyncSourceId(null);
+    },
     onSuccess: () => void queryClient.invalidateQueries(),
   });
   const ingestNextGmailMutation = useMutation({
-    mutationFn: ingestNextGmailBatch,
+    mutationFn: (sourceConnectionId?: string) => ingestNextGmailBatch(sourceConnectionId),
+    onMutate: (sourceConnectionId?: string) => {
+      setPendingIngestSourceId(sourceConnectionId || null);
+    },
+    onSettled: () => {
+      setPendingIngestSourceId(null);
+    },
     onSuccess: () => void queryClient.invalidateQueries(),
   });
   const backfillOlderGmailMutation = useMutation({
-    mutationFn: backfillOlderGmailBatch,
+    mutationFn: (sourceConnectionId?: string) => backfillOlderGmailBatch(sourceConnectionId),
+    onMutate: (sourceConnectionId?: string) => {
+      setPendingBackfillSourceId(sourceConnectionId || null);
+    },
+    onSettled: () => {
+      setPendingBackfillSourceId(null);
+    },
     onSuccess: () => void queryClient.invalidateQueries(),
   });
   const syncMockMutation = useMutation({
@@ -1555,10 +1595,17 @@ function SettingsRoute() {
   if (status.isLoading || !status.data) return <Loading label="Loading settings" />;
   const statusData = status.data;
   const sources = resolveSources(statusData);
-  const connectedSources = sources.filter((source) => source.connected);
-  const availableSources = sources.filter((source) => !source.connected && source.entry.realConnection);
   const configMissing = [...statusData.configMissing, ...(statusData.securityMissing || [])];
-  const hasGmail = sources.some((source) => source.entry.key === "gmail" && source.connected);
+  const accounts = Array.isArray(statusData.accounts)
+    ? statusData.accounts
+    : statusData.account
+      ? [statusData.account]
+      : [];
+  const connectedAccountCount = accounts.filter(Boolean).length;
+  const sourceCounts = buildSourceCountsMap(statusData);
+  const gmailAccounts = accounts.filter((a) => a?.provider === "gmail" && !a.demo);
+  const demoAccount = accounts.find((a) => a?.provider === "mock" || a?.demo) || null;
+  const hasGmail = gmailAccounts.length > 0;
 
   return (
     <div className="page-grid">
@@ -1590,32 +1637,65 @@ function SettingsRoute() {
           <div>
             <h2>Sources</h2>
             <p>
-              {connectedSources.length === 1
+              {connectedAccountCount === 1
                 ? "1 source connected."
-                : `${connectedSources.length} sources connected.`}
+                : `${connectedAccountCount} sources connected.`}
             </p>
           </div>
         </div>
         <div className="source-list">
-          {connectedSources.map((source) => (
+          {demoAccount ? (
             <SourceConnectionCard
-              key={source.entry.key}
-              source={source}
+              key="synthetic-local-dev"
+              source={{
+                entry: SOURCE_CATALOG.find((e) => e.key === "synthetic-local-dev")!,
+                connected: true,
+                account: demoAccount,
+                email: demoAccount.email || "",
+              }}
+              sourceCounts={sourceCounts}
               gmailReadonly={statusData.gmailReadonly}
               configMissing={configMissing}
-              syncGmailPending={syncGmailMutation.isPending}
-              queueGmailPending={ingestNextGmailMutation.isPending}
-              backfillGmailPending={backfillOlderGmailMutation.isPending}
+              syncGmailPending={syncGmailMutation.isPending && pendingSyncSourceId === null}
+              queueGmailPending={ingestNextGmailMutation.isPending && pendingIngestSourceId === null}
+              backfillGmailPending={backfillOlderGmailMutation.isPending && pendingBackfillSourceId === null}
               syncMockPending={syncMockMutation.isPending}
               disconnectPending={disconnectMutation.isPending}
               demoResetPending={demoResetMutation.isPending}
               demoClearPending={demoClearMutation.isPending}
               hasGmail={hasGmail}
-              onSyncGmail={() => syncGmailMutation.mutate()}
-              onQueueGmail={() => ingestNextGmailMutation.mutate()}
-              onBackfillGmail={() => backfillOlderGmailMutation.mutate()}
+              onSyncGmail={() => syncGmailMutation.mutate(undefined)}
+              onQueueGmail={() => ingestNextGmailMutation.mutate(undefined)}
+              onBackfillGmail={() => backfillOlderGmailMutation.mutate(undefined)}
               onSyncMock={() => syncMockMutation.mutate()}
-              onDisconnect={() => disconnectMutation.mutate()}
+              onResetDemo={() => demoResetMutation.mutate()}
+              onClearDemo={() => demoClearMutation.mutate()}
+            />
+          ) : null}
+          {gmailAccounts.map((account) => (
+            <SourceConnectionCard
+              key={account.id}
+              source={{
+                entry: SOURCE_CATALOG.find((e) => e.key === "gmail")!,
+                connected: true,
+                account,
+                email: account.email || "",
+              }}
+              sourceCounts={sourceCounts}
+              gmailReadonly={statusData.gmailReadonly}
+              configMissing={configMissing}
+              syncGmailPending={syncGmailMutation.isPending && pendingSyncSourceId === account.id}
+              queueGmailPending={ingestNextGmailMutation.isPending && pendingIngestSourceId === account.id}
+              backfillGmailPending={backfillOlderGmailMutation.isPending && pendingBackfillSourceId === account.id}
+              syncMockPending={syncMockMutation.isPending}
+              disconnectPending={disconnectMutation.isPending}
+              demoResetPending={demoResetMutation.isPending}
+              demoClearPending={demoClearMutation.isPending}
+              hasGmail={hasGmail}
+              onSyncGmail={() => syncGmailMutation.mutate(account.id)}
+              onQueueGmail={() => ingestNextGmailMutation.mutate(account.id)}
+              onBackfillGmail={() => backfillOlderGmailMutation.mutate(account.id)}
+              onSyncMock={() => syncMockMutation.mutate()}
               onResetDemo={() => demoResetMutation.mutate()}
               onClearDemo={() => demoClearMutation.mutate()}
             />
@@ -1623,48 +1703,43 @@ function SettingsRoute() {
         </div>
       </section>
 
-      {availableSources.length > 0 && (
-        <section className="surface" data-testid="settings-add-source">
-          <div className="section-header">
-            <div>
-              <h2>Add another source</h2>
-              <p>Bring more mail into Togo Mail by connecting an additional provider.</p>
-            </div>
+      <section className="surface" data-testid="settings-add-source">
+        <div className="section-header">
+          <div>
+            <h2>Add another source</h2>
+            <p>Bring more mail into Togo Mail by connecting an additional provider.</p>
           </div>
-          <div className="add-source-list">
-            {availableSources.map((source) => {
-              const Icon = source.entry.icon;
-              const blockedByConfig = source.entry.key === "gmail" && configMissing.length > 0;
-              return (
-                <div className="add-source-row" key={source.entry.key}>
-                  <div className="add-source-info">
-                    <span className="add-source-icon"><Icon size={18} /></span>
-                    <div>
-                      <strong>{source.entry.label}</strong>
-                      <span>{source.entry.description}</span>
-                    </div>
+        </div>
+        <div className="add-source-list">
+          {(() => {
+            const gmail = SOURCE_CATALOG.find((e) => e.key === "gmail")!;
+            const Icon = gmail.icon;
+            const blockedByConfig = configMissing.length > 0;
+            return (
+              <div className="add-source-row" key={gmail.key}>
+                <div className="add-source-info">
+                  <span className="add-source-icon"><Icon size={18} /></span>
+                  <div>
+                    <strong>{gmail.label}</strong>
+                    <span>{gmail.description}</span>
                   </div>
-                  {source.entry.key === "gmail" ? (
-                    blockedByConfig ? (
-                      <span className="pill muted-pill" title={configMissing.join(", ")}>
-                        Needs config: {configMissing.join(", ")}
-                      </span>
-                    ) : (
-                      <ConnectGmailButton
-                        label={`Connect ${source.entry.label}`}
-                        icon={Plus}
-                        testId="settings-connect-gmail"
-                      />
-                    )
-                  ) : (
-                    <span className="pill">Built-in</span>
-                  )}
                 </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
+                {blockedByConfig ? (
+                  <span className="pill muted-pill" title={configMissing.join(", ")}>
+                    Needs config: {configMissing.join(", ")}
+                  </span>
+                ) : (
+                  <ConnectGmailButton
+                    label={hasGmail ? "Connect another Gmail" : "Connect Gmail"}
+                    icon={Plus}
+                    testId="settings-connect-gmail"
+                  />
+                )}
+              </div>
+            );
+          })()}
+        </div>
+      </section>
 
       <section className="surface">
         <div className="section-header">
@@ -1715,6 +1790,7 @@ function SettingsRoute() {
 
 function SourceConnectionCard({
   source,
+  sourceCounts,
   gmailReadonly,
   configMissing,
   syncGmailPending,
@@ -1729,11 +1805,11 @@ function SourceConnectionCard({
   onQueueGmail,
   onBackfillGmail,
   onSyncMock,
-  onDisconnect,
   onResetDemo,
   onClearDemo,
 }: {
   source: ResolvedSource;
+  sourceCounts: SourceCountsMap;
   gmailReadonly: string;
   configMissing: string[];
   syncGmailPending: boolean;
@@ -1748,7 +1824,6 @@ function SourceConnectionCard({
   onQueueGmail: () => void;
   onBackfillGmail: () => void;
   onSyncMock: () => void;
-  onDisconnect: () => void;
   onResetDemo: () => void;
   onClearDemo: () => void;
 }) {
@@ -1756,6 +1831,7 @@ function SourceConnectionCard({
   const isDev = source.entry.key === "synthetic-local-dev";
   const isGmail = source.entry.key === "gmail";
   const blockedByConfig = isGmail && configMissing.length > 0;
+  const counts = source.account?.id ? sourceCounts.get(source.account.id) : undefined;
 
   return (
     <div
@@ -1784,6 +1860,9 @@ function SourceConnectionCard({
         {isDev && <span className="pill">default</span>}
         {isGmail && <span className="pill">read-only</span>}
         {isGmail && <span className="muted">{gmailReadonly}</span>}
+        {typeof counts?.syncedMessages === "number" ? (
+          <span className="pill muted-pill">{counts.syncedMessages} synced locally</span>
+        ) : null}
         {source.account?.updatedAt && (
           <span className="muted">updated {formatDate(source.account.updatedAt)}</span>
         )}
@@ -1856,15 +1935,6 @@ function SourceConnectionCard({
             >
               {backfillGmailPending ? <Loader2 className="spin" size={16} /> : <Archive size={16} />}
               Backfill older
-            </button>
-            <button
-              className="button danger-button"
-              onClick={onDisconnect}
-              disabled={disconnectPending}
-              data-testid="source-disconnect-gmail"
-            >
-              <Trash2 size={16} />
-              Disconnect
             </button>
           </>
         )}

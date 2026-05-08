@@ -79,38 +79,38 @@ export function saveFeedback(id: string, kind: FeedbackKind) {
   );
 }
 
-export function syncGmail() {
+export function syncGmail(sourceConnectionId?: string) {
   return apiFetch<SyncResponse>("/api/sync/gmail", {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify(sourceConnectionId ? { sourceConnectionId } : {}),
   });
 }
 
-export function queueGmailSync() {
+export function queueGmailSync(sourceConnectionId?: string) {
   return apiFetch<{ ok: true; queued: SyncResponse["queued"] }>("/api/queue/sync/gmail", {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify(sourceConnectionId ? { sourceConnectionId } : {}),
   });
 }
 
-export function queueGmailBackfillOlder() {
+export function queueGmailBackfillOlder(sourceConnectionId?: string) {
   return apiFetch<{ ok: true; queued: SyncResponse["queued"] }>("/api/queue/backfill/gmail", {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify(sourceConnectionId ? { sourceConnectionId } : {}),
   });
 }
 
-export function ingestNextGmailBatch() {
+export function ingestNextGmailBatch(sourceConnectionId?: string) {
   return apiFetch<SyncResponse>("/api/ingest/gmail/next", {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify(sourceConnectionId ? { sourceConnectionId } : {}),
   });
 }
 
-export function backfillOlderGmailBatch() {
+export function backfillOlderGmailBatch(sourceConnectionId?: string) {
   return apiFetch<SyncResponse>("/api/ingest/gmail/backfill", {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify(sourceConnectionId ? { sourceConnectionId } : {}),
   });
 }
 

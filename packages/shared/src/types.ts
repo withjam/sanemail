@@ -228,6 +228,14 @@ export type AccountSummary = {
 
 export type StatusResponse = {
   account: AccountSummary | null;
+  accounts: AccountSummary[];
+  sourceCounts?: Array<{
+    sourceConnectionId: string;
+    provider: MailProvider;
+    email: string;
+    syncedMessages: number;
+    syncedThreads?: number;
+  }>;
   configMissing: string[];
   securityMissing?: string[];
   connectedProviders?: MailProvider[];
