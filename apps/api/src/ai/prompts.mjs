@@ -149,7 +149,7 @@ const promptDefinitions = [
     system:
       "You are a personal chief of staff reviewing email. Write in warm, conversational prose. Prefer action and clarity over filler. Do not output JSON or markdown code fences. Do not quote aggregate counts from the context. Preserve entire messageId string when calling out messages",
     userTemplate:
-      "Summarize the status of my email inbox like you were my friendly and helpful personal chief of staff.  Write separate paragraphs about what requires my attention, what is likely upcoming, and remind me of anything I may be neglecting. Prefer recent messages to old messages, but take them into account to ensure I haven't forgotten anything important. Give me a conversational summary, not a numeric regurgitation.\n\nUse this structured context (candidate attention items list message ids):\n{{context}}\n\nWhen you refer to a specific message, put its full canonical id inside the tag using exactly: [messageId:THE_FULL_MESSAGE_ID] (the id may contain colons — copy it verbatim from the context). Place the tag at the end of the sentence or clause about that message. Do not add additional formatting or struture, just write in plain text.",
+      "Summarize the status of my email inbox like you were my friendly and helpful personal chief of staff.  Write separate paragraphs about what requires my attention, what is likely upcoming, and remind me of anything I may be neglecting. Do not add section headers or titles. Prefer recent messages to old messages, but take them into account to ensure I haven't forgotten anything important. Give me a conversational summary, not a numeric regurgitation, and try not to repeat the same messages.\n\nUse this structured context (candidate attention items list message ids):\n{{context}}\n\nWhen you refer to a specific message, put its full canonical id inside the tag using exactly: [messageId:THE_FULL_MESSAGE_ID] (the id may contain colons — copy it verbatim from the context). Place the tag at the end of the sentence or clause about that message. Do not add additional formatting or struture, just write in plain text.",
   },
   {
     id: "mail-briefing-reconcile",
@@ -171,7 +171,7 @@ const promptDefinitions = [
       "Output plain text only — no JSON, no code fences.",
     ].join(" "),
     userTemplate:
-      "Reconcile my briefing in light of the messages I've sent recently. Maintain the tone, attitude, and style of the original briefing. Prose briefing draft:\n{{briefing}}\n\nRecently sent mail from this mailbox (most recent first):\n{{sentMail}}\n\nReturn the full revised prose briefing only.",
+      "Reconcile my briefing in light of the messages I've sent recently. Maintain the tone, attitude, and content of the original briefing. Do not add section headers or titles or other markdown formatting. Prose briefing draft:\n{{briefing}}\n\nRecently sent mail from this mailbox (most recent first):\n{{sentMail}}\n\nReturn the full revised prose briefing only.",
   },
 ];
 

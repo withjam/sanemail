@@ -1536,38 +1536,62 @@ function resolveSources(status: StatusResponse): ResolvedSource[] {
   });
 }
 
+const PENDING_SOURCE_PRIMARY = "__primary__";
+
+function pendingSourceKey(sourceConnectionId?: string) {
+  return sourceConnectionId ?? PENDING_SOURCE_PRIMARY;
+}
+
 function SettingsRoute() {
   const status = useStatus();
-  const [pendingSyncSourceId, setPendingSyncSourceId] = useState<string | null>(null);
-  const [pendingIngestSourceId, setPendingIngestSourceId] = useState<string | null>(null);
-  const [pendingBackfillSourceId, setPendingBackfillSourceId] = useState<string | null>(null);
+  const [pendingSyncKeys, setPendingSyncKeys] = useState(() => new Set<string>());
+  const [pendingIngestKeys, setPendingIngestKeys] = useState(() => new Set<string>());
+  const [pendingBackfillKeys, setPendingBackfillKeys] = useState(() => new Set<string>());
   const syncGmailMutation = useMutation({
     mutationFn: (sourceConnectionId?: string) => syncGmail(sourceConnectionId),
     onMutate: (sourceConnectionId?: string) => {
-      setPendingSyncSourceId(sourceConnectionId || null);
+      const key = pendingSourceKey(sourceConnectionId);
+      setPendingSyncKeys((prev) => new Set(prev).add(key));
     },
-    onSettled: () => {
-      setPendingSyncSourceId(null);
+    onSettled: (_data, _err, variables?: string) => {
+      const key = pendingSourceKey(variables);
+      setPendingSyncKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     },
     onSuccess: () => void queryClient.invalidateQueries(),
   });
   const ingestNextGmailMutation = useMutation({
     mutationFn: (sourceConnectionId?: string) => ingestNextGmailBatch(sourceConnectionId),
     onMutate: (sourceConnectionId?: string) => {
-      setPendingIngestSourceId(sourceConnectionId || null);
+      const key = pendingSourceKey(sourceConnectionId);
+      setPendingIngestKeys((prev) => new Set(prev).add(key));
     },
-    onSettled: () => {
-      setPendingIngestSourceId(null);
+    onSettled: (_data, _err, variables?: string) => {
+      const key = pendingSourceKey(variables);
+      setPendingIngestKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     },
     onSuccess: () => void queryClient.invalidateQueries(),
   });
   const backfillOlderGmailMutation = useMutation({
     mutationFn: (sourceConnectionId?: string) => backfillOlderGmailBatch(sourceConnectionId),
     onMutate: (sourceConnectionId?: string) => {
-      setPendingBackfillSourceId(sourceConnectionId || null);
+      const key = pendingSourceKey(sourceConnectionId);
+      setPendingBackfillKeys((prev) => new Set(prev).add(key));
     },
-    onSettled: () => {
-      setPendingBackfillSourceId(null);
+    onSettled: (_data, _err, variables?: string) => {
+      const key = pendingSourceKey(variables);
+      setPendingBackfillKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     },
     onSuccess: () => void queryClient.invalidateQueries(),
   });
@@ -1656,9 +1680,9 @@ function SettingsRoute() {
               sourceCounts={sourceCounts}
               gmailReadonly={statusData.gmailReadonly}
               configMissing={configMissing}
-              syncGmailPending={syncGmailMutation.isPending && pendingSyncSourceId === null}
-              queueGmailPending={ingestNextGmailMutation.isPending && pendingIngestSourceId === null}
-              backfillGmailPending={backfillOlderGmailMutation.isPending && pendingBackfillSourceId === null}
+              syncGmailPending={pendingSyncKeys.has(PENDING_SOURCE_PRIMARY)}
+              queueGmailPending={pendingIngestKeys.has(PENDING_SOURCE_PRIMARY)}
+              backfillGmailPending={pendingBackfillKeys.has(PENDING_SOURCE_PRIMARY)}
               syncMockPending={syncMockMutation.isPending}
               disconnectPending={disconnectMutation.isPending}
               demoResetPending={demoResetMutation.isPending}
@@ -1684,9 +1708,9 @@ function SettingsRoute() {
               sourceCounts={sourceCounts}
               gmailReadonly={statusData.gmailReadonly}
               configMissing={configMissing}
-              syncGmailPending={syncGmailMutation.isPending && pendingSyncSourceId === account.id}
-              queueGmailPending={ingestNextGmailMutation.isPending && pendingIngestSourceId === account.id}
-              backfillGmailPending={backfillOlderGmailMutation.isPending && pendingBackfillSourceId === account.id}
+              syncGmailPending={pendingSyncKeys.has(account.id)}
+              queueGmailPending={pendingIngestKeys.has(account.id)}
+              backfillGmailPending={pendingBackfillKeys.has(account.id)}
               syncMockPending={syncMockMutation.isPending}
               disconnectPending={disconnectMutation.isPending}
               demoResetPending={demoResetMutation.isPending}
