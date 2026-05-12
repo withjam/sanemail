@@ -10,6 +10,7 @@ import type {
   MessageResponse,
   MessagesResponse,
   RecentClassificationsResponse,
+  QueueAutomationResponse,
   StatusResponse,
   SyncResponse,
   SyntheticIngestionResponse,
@@ -47,6 +48,19 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function getStatus() {
   return apiFetch<StatusResponse>("/api/status");
+}
+
+export function getQueueAutomation() {
+  return apiFetch<QueueAutomationResponse>("/api/queue/automation");
+}
+
+export function putQueueAutomation(enabled: boolean, sourceConnectionId?: string) {
+  return apiFetch<QueueAutomationResponse>("/api/queue/automation", {
+    method: "PUT",
+    body: JSON.stringify(
+      sourceConnectionId ? { enabled, sourceConnectionId } : { enabled },
+    ),
+  });
 }
 
 export function getHome() {
@@ -104,6 +118,16 @@ export function ingestNextGmailBatch(sourceConnectionId?: string) {
   return apiFetch<SyncResponse>("/api/ingest/gmail/next", {
     method: "POST",
     body: JSON.stringify(sourceConnectionId ? { sourceConnectionId } : {}),
+  });
+}
+
+export function queueGmailSyncAll() {
+  return apiFetch<{
+    ok: true;
+    fanout: { sources: number; results: Array<{ sourceConnectionId: string; email: string; queued: unknown }> };
+  }>("/api/queue/sync/gmail/all", {
+    method: "POST",
+    body: JSON.stringify({}),
   });
 }
 

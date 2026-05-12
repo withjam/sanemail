@@ -43,12 +43,16 @@ import {
 import { getClassifiedMessages, isSentByMailbox } from "./classifier.mjs";
 import { findMessageForUserRef, messagePreviewForStore } from "./message-resolve.mjs";
 import { extractCompletionEvents } from "./completion-extract.mjs";
-import { listQueueJobs } from "./queue.mjs";
-import { enqueueJob } from "./queue.mjs";
+import { enqueueJob, listQueueJobs } from "./queue.mjs";
+import { enqueueGmailSyncForAllConnections, startGmailAutoPollTimerIfConfigured, stopGmailAutoPollTimer } from "./gmail-queue-fanout.mjs";
 import { resetDemoData } from "./demo-data.mjs";
 import { syncSourceConnection } from "./source-sync.mjs";
 import { synthesizeIngestionBatch } from "./synthetic-ingestion.mjs";
 import { maybeEnqueuePostIngestClassification } from "./post-ingest-jobs.mjs";
+import {
+  buildQueueAutomationResponse,
+  setQueueAutomationEnabled,
+} from "./queue-automation-api.mjs";
 import { getPromptRecords } from "./ai/prompts.mjs";
 import { getAiEvalRecords } from "./ai/evals.mjs";
 import { buildInboxBriefing, runClassificationBatch, runDailyBrief } from "./ai/pipeline.mjs";
@@ -122,17 +126,29 @@ function buildSourceCounts(store) {
     }));
 }
 
-function getMessageList(store, account) {
-  return getClassifiedMessages(store, account)
-    .filter((message) => !isSentByMailbox(message, account))
+function accountsByIdMap(store) {
+  return new Map((store.accounts || []).filter(Boolean).map((a) => [a.id, a]));
+}
+
+function getMessageList(store) {
+  const byAccount = accountsByIdMap(store);
+  return getClassifiedMessages(store, null)
+    .filter((message) => {
+      const mailbox = byAccount.get(message.accountId);
+      return !isSentByMailbox(message, mailbox || {});
+    })
     .sort(
       (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
     );
 }
 
-function getTodayMessages(store, account) {
-  return getClassifiedMessages(store, account)
-    .filter((message) => !isSentByMailbox(message, account))
+function getTodayMessages(store) {
+  const byAccount = accountsByIdMap(store);
+  return getClassifiedMessages(store, null)
+    .filter((message) => {
+      const mailbox = byAccount.get(message.accountId);
+      return !isSentByMailbox(message, mailbox || {});
+    })
     .filter((message) => !message.sane.possibleJunk)
     .filter((message) => message.sane.category === "Today" || message.sane.needsReply)
     .sort((a, b) => b.sane.todayScore - a.sane.todayScore)
@@ -291,8 +307,8 @@ async function routeStatus(userId, response) {
   const account = pickPrimaryAccount(store);
   const accounts = (store.accounts || []).map(publicAccount).filter(Boolean);
   const sourceCounts = buildSourceCounts(store);
-  const messages = getMessageList(store, account);
-  const today = getTodayMessages(store, account);
+  const messages = getMessageList(store);
+  const today = getTodayMessages(store);
   const connectedProviders = [...new Set((store.accounts || []).map((a) => a?.provider).filter(Boolean))];
 
   sendJson(response, {
@@ -316,20 +332,17 @@ async function routeStatus(userId, response) {
 
 async function routeMessages(userId, response) {
   const store = await readStoreFor(userId);
-  const account = pickPrimaryAccount(store);
-  sendJson(response, { messages: getMessageList(store, account) });
+  sendJson(response, { messages: getMessageList(store) });
 }
 
 async function routeToday(userId, response) {
   const store = await readStoreFor(userId);
-  const account = pickPrimaryAccount(store);
-  sendJson(response, { messages: getTodayMessages(store, account) });
+  sendJson(response, { messages: getTodayMessages(store) });
 }
 
 async function routeHome(userId, response) {
   const store = await readStoreFor(userId);
-  const account = pickPrimaryAccount(store);
-  const messages = getMessageList(store, account);
+  const messages = getMessageList(store);
   const visibleMessages = messages.filter((message) => !message.sane.possibleJunk);
   const run = latestAiRun(store);
   // Store is already user-scoped via readStoreFor(); no per-account filter needed.
@@ -381,8 +394,7 @@ async function routeHome(userId, response) {
 
 async function routeMessage(userId, messageId, response) {
   const store = await readStoreFor(userId);
-  const account = pickPrimaryAccount(store);
-  let message = getMessageList(store, account).find((item) => item.id === messageId);
+  let message = getMessageList(store).find((item) => item.id === messageId);
   if (!message) {
     const recovered = findMessageForUserRef(store, messageId);
     if (recovered && recovered.id === messageId) message = recovered;
@@ -446,6 +458,33 @@ function pickGmailAccount(store, sourceConnectionId) {
   return accounts.find((account) => account?.provider === "gmail") || null;
 }
 
+async function routeQueueAutomationGet(userId, response) {
+  sendJson(response, await buildQueueAutomationResponse(userId));
+}
+
+async function routeQueueAutomationPut(userId, request, response) {
+  try {
+    const body = await parseJsonBody(request);
+    const enabled = body?.enabled;
+    const sourceConnectionId = body?.sourceConnectionId ? String(body.sourceConnectionId) : undefined;
+    const payload = await setQueueAutomationEnabled(userId, {
+      enabled,
+      sourceConnectionId,
+    });
+    sendJson(response, payload);
+  } catch (error) {
+    if (error?.code === "queue_control_forbidden") {
+      sendJson(response, { error: error.code, message: error.message }, 403);
+      return;
+    }
+    if (error?.code === "invalid_body" || error?.code === "unknown_source") {
+      sendJson(response, { error: error.code, message: error.message }, 400);
+      return;
+    }
+    throw error;
+  }
+}
+
 async function routeSyncGmail(userId, request, response) {
   const body = await parseJsonBody(request);
   const sourceConnectionId = body?.sourceConnectionId ? String(body.sourceConnectionId) : null;
@@ -479,6 +518,17 @@ async function routeQueueGmailSync(userId, request, response) {
     requestedAt: new Date().toISOString(),
   });
   sendJson(response, { ok: true, queued });
+}
+
+async function routeQueueGmailSyncAll(userId, response) {
+  const store = await readStoreFor(userId);
+  const gmailCount = (store.accounts || []).filter((a) => a && a.provider === "gmail" && !a.demo).length;
+  if (!gmailCount) {
+    sendJson(response, { error: "gmail_not_connected", message: "No Gmail account is connected." }, 400);
+    return;
+  }
+  const fanout = await enqueueGmailSyncForAllConnections(userId, { trigger: "manual" });
+  sendJson(response, { ok: true, fanout });
 }
 
 async function routeQueueGmailBackfill(userId, request, response) {
@@ -826,6 +876,9 @@ async function handleApi(url, request, response) {
   if (request.method === "POST" && url.pathname === "/api/sync/gmail") return routeSyncGmail(userId, request, response);
   if (request.method === "POST" && url.pathname === "/api/sync/mock") return routeSyncMock(userId, response);
   if (request.method === "POST" && url.pathname === "/api/queue/sync/gmail") return routeQueueGmailSync(userId, request, response);
+  if (request.method === "POST" && url.pathname === "/api/queue/sync/gmail/all") {
+    return routeQueueGmailSyncAll(userId, response);
+  }
   if (request.method === "POST" && url.pathname === "/api/queue/backfill/gmail") return routeQueueGmailBackfill(userId, request, response);
   if (request.method === "POST" && url.pathname === "/api/ingest/gmail/next") {
     return routeDirectGmailIngest(userId, request, response, { cursorHint: "latest", trigger: "manual" });
@@ -839,6 +892,12 @@ async function handleApi(url, request, response) {
   if (request.method === "GET" && url.pathname === "/api/ai/control") return routeAiControl(userId, response);
   if (request.method === "GET" && url.pathname === "/api/queue/jobs") {
     return sendJson(response, { jobs: await listQueueJobs(50) });
+  }
+  if (request.method === "GET" && url.pathname === "/api/queue/automation") {
+    return routeQueueAutomationGet(userId, response);
+  }
+  if (request.method === "PUT" && url.pathname === "/api/queue/automation") {
+    return routeQueueAutomationPut(userId, request, response);
   }
   if (request.method === "GET" && url.pathname === "/api/ai/runs") {
     return sendJson(response, { runs: await listAiRunsFor(userId, 50) });
@@ -1021,12 +1080,17 @@ function logOllamaBoot() {
   });
 }
 
-export function installGracefulShutdown(server, { timeoutMs = 25_000 } = {}) {
+export function installGracefulShutdown(server, { timeoutMs = 25_000, onBeforeClose } = {}) {
   let shuttingDown = false;
   const handle = (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`[shutdown] received ${signal}, draining connections`);
+    try {
+      onBeforeClose?.();
+    } catch (error) {
+      console.error("[shutdown] onBeforeClose error", error);
+    }
     const force = setTimeout(() => {
       console.error("[shutdown] timeout exceeded, forcing exit");
       process.exit(1);
@@ -1048,7 +1112,7 @@ export function installGracefulShutdown(server, { timeoutMs = 25_000 } = {}) {
 export function startServer() {
   assertProductionConfig(config);
   const server = createServer();
-  installGracefulShutdown(server);
+  installGracefulShutdown(server, { onBeforeClose: () => stopGmailAutoPollTimer() });
   server.listen(config.port, config.host, () => {
     const address = server.address();
     const origin =
@@ -1057,6 +1121,7 @@ export function startServer() {
         : config.appOrigin;
     console.log(`SaneMail API running at ${origin}`);
     logOllamaBoot();
+    startGmailAutoPollTimerIfConfigured();
   });
   return server;
 }

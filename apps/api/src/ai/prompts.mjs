@@ -126,7 +126,7 @@ const promptDefinitions = [
   },
   {
     id: "mail-briefing-prose",
-    version: "2026-05-08.2",
+    version: "2026-05-11.1",
     stage: "briefing",
     title: "Inbox briefing (prose)",
     description:
@@ -149,11 +149,11 @@ const promptDefinitions = [
     system:
       "You are a personal chief of staff reviewing email. Write in warm, conversational prose. Prefer action and clarity over filler. Do not output JSON or markdown code fences. Do not quote aggregate counts from the context. Preserve entire messageId string when calling out messages",
     userTemplate:
-      "Summarize the status of my email inbox like you were my friendly and helpful personal chief of staff.  Write separate paragraphs about what requires my attention, what is likely upcoming, and remind me of anything I may be neglecting. Do not add section headers or titles. Prefer recent messages to old messages, but take them into account to ensure I haven't forgotten anything important. Give me a conversational summary, not a numeric regurgitation, and try not to repeat the same messages.\n\nUse this structured context (candidate attention items list message ids):\n{{context}}\n\nWhen you refer to a specific message, put its full canonical id inside the tag using exactly: [messageId:THE_FULL_MESSAGE_ID] (the id may contain colons — copy it verbatim from the context). Place the tag at the end of the sentence or clause about that message. Do not add additional formatting or struture, just write in plain text.",
+      "Summarize the status of my email inbox like you were my friendly and helpful personal chief of staff.  Write separate paragraphs about what requires my attention, what is likely upcoming, and remind me of anything I may be neglecting. Do not add section headers or titles. Prefer recent messages to old messages, but take them into account to ensure I haven't forgotten anything important. Give me a conversational summary, not a numeric regurgitation, and try not to repeat the same messages. Base attention only on the latest message in each thread described in the context — do not revive obligations that appear only as quoted history inside a newer message unless the context explicitly flags them as still open.\n\nUse this structured context (candidate attention items list message ids):\n{{context}}\n\nWhen you refer to a specific message, put its full canonical id inside the tag using exactly: [messageId:THE_FULL_MESSAGE_ID] (the id may contain colons — copy it verbatim from the context). Place the tag at the end of the sentence or clause about that message. Do not add additional formatting or struture, just write in plain text.",
   },
   {
     id: "mail-briefing-reconcile",
-    version: "2026-05-08.1",
+    version: "2026-05-11.1",
     stage: "briefing",
     title: "Inbox briefing reconciliation (prose)",
     description:
@@ -165,7 +165,7 @@ const promptDefinitions = [
     responseSchema: { prose: "string" },
     system: [
       "You help reconcile an inbox briefing with recently sent mail from the same mailbox.",
-      "You receive a prose briefing and a list of sent messages. If sent mail clearly shows the user already handled something mentioned in the briefing, update the prose: you may remove or soften that item and briefly note it is already addressed.",
+      "You receive a prose briefing and a list of sent messages (subject, recipients, snippet, and a short body preview). If sent mail clearly shows the user already handled something mentioned in the briefing — including calendar invite responses (Accepted / Declined / Tentative), short replies in-thread, or forwards — update the prose: you may remove or soften that item and briefly note it is already addressed.",
       "Be conservative; if evidence is weak, leave the briefing unchanged.",
       "Preserve any [messageId:...] tags when those messages are still relevant.",
       "Output plain text only — no JSON, no code fences.",

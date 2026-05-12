@@ -1271,3 +1271,150 @@ textarea {
 .signin-toggle:hover {
   text-decoration: underline;
 }
+
+/* Settings: background queue automation */
+.queue-automation-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.queue-automation-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.queue-switch-track {
+  width: 44px;
+  height: 26px;
+  border-radius: 13px;
+  background: var(--line);
+  border: none;
+  padding: 3px;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.15s ease;
+  flex-shrink: 0;
+}
+
+.queue-switch-track[data-on="true"] {
+  background: var(--accent);
+}
+
+.queue-switch-track:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.queue-switch-thumb {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
+  transition: transform 0.15s ease;
+  transform: translateX(0);
+}
+
+.queue-switch-track[data-on="true"] .queue-switch-thumb {
+  transform: translateX(18px);
+}
+
+.queue-automation-meta {
+  display: grid;
+  gap: 6px;
+  font-size: 0.88rem;
+  color: var(--muted);
+  margin-top: 12px;
+}
+
+.queue-automation-meta strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.queue-job-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.queue-job-metric {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.queue-job-metric span {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.queue-job-metric strong {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.queue-recent-jobs {
+  margin-top: 16px;
+  font-size: 0.85rem;
+}
+
+.queue-recent-jobs table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.queue-recent-jobs th,
+.queue-recent-jobs td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.queue-recent-jobs th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.source-queue-expand {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 4px;
+}
+
+.source-queue-expand-trigger {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-align: left;
+}
+
+.source-queue-expand-trigger:hover {
+  color: var(--accent);
+}
+
+.source-queue-expand-body {
+  padding: 0 0 12px 26px;
+}

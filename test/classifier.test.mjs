@@ -42,6 +42,19 @@ test("classifies direct action language as needing reply", () => {
   assert.equal(result.direct, true);
 });
 
+test("quoted thread with questions does not alone trigger needsReply", () => {
+  const result = classifyMessage(
+    message({
+      subject: "Re: planning",
+      bodyText:
+        "Agreed.\n\nOn Tue, Jan 2, 2024 at 3:00 PM Pat <pat@example.com> wrote:\n> Can you confirm availability?",
+    }),
+    account,
+  );
+
+  assert.equal(result.needsReply, false);
+});
+
 test("keeps automated list mail out of Today", () => {
   const result = classifyMessage(
     message({

@@ -14,6 +14,8 @@ import {
   BrainCircuit,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Circle,
   Clock3,
   Database,
@@ -51,6 +53,8 @@ import type {
   MessagePreview,
   PhoenixObservabilityStatus,
   RecentClassification,
+  QueueAutomationSourceRow,
+  QueueAutomationResponse,
   StatusResponse,
   SyntheticIngestionResponse,
 } from "@togomail/shared/types";
@@ -65,6 +69,7 @@ import {
   getMessagePreview,
   getMessages,
   getRecentClassifications,
+  getQueueAutomation,
   getStatus,
   getToday,
   backfillOlderGmailBatch,
@@ -75,6 +80,8 @@ import {
   saveFeedback,
   startGmailConnect,
   synthesizeIngestionBatch,
+  putQueueAutomation,
+  queueGmailSyncAll,
   syncGmail,
   syncMock,
 } from "./api";
@@ -1611,6 +1618,32 @@ function SettingsRoute() {
     mutationFn: clearDemoData,
     onSuccess: () => void queryClient.invalidateQueries(),
   });
+  const [queueExpandedIds, setQueueExpandedIds] = useState(() => new Set<string>());
+  const queueAutomationQuery = useQuery({
+    queryKey: ["queue-automation"],
+    queryFn: getQueueAutomation,
+    refetchInterval: 10_000,
+    enabled: Boolean(status.data?.authenticated),
+  });
+  const putQueueAutomationMutation = useMutation({
+    mutationFn: (vars: { enabled: boolean; sourceConnectionId: string }) =>
+      putQueueAutomation(vars.enabled, vars.sourceConnectionId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["queue-automation"] });
+    },
+  });
+  const queueGmailSyncAllMutation = useMutation({
+    mutationFn: queueGmailSyncAll,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["queue-automation"] });
+      void queryClient.invalidateQueries();
+    },
+  });
+  const queueRowById = useMemo(() => {
+    const rows = queueAutomationQuery.data?.sources;
+    if (!rows?.length) return new Map<string, QueueAutomationSourceRow>();
+    return new Map(rows.map((row) => [row.sourceConnectionId, row]));
+  }, [queueAutomationQuery.data]);
   const params = new URLSearchParams(window.location.search);
   const oauthError = params.get("error");
   const connectedQuery = params.get("connected");
@@ -1663,7 +1696,9 @@ function SettingsRoute() {
             <p>
               {connectedAccountCount === 1
                 ? "1 source connected."
-                : `${connectedAccountCount} sources connected.`}
+                : `${connectedAccountCount} sources connected.`}{" "}
+              Expand <strong>Background queue</strong> on a source to turn post-ingest automation on or off for that
+              mailbox only.
             </p>
           </div>
         </div>
@@ -1694,6 +1729,32 @@ function SettingsRoute() {
               onSyncMock={() => syncMockMutation.mutate()}
               onResetDemo={() => demoResetMutation.mutate()}
               onClearDemo={() => demoClearMutation.mutate()}
+              queueAutomation={queueAutomationQuery.data}
+              queueRow={demoAccount?.id ? queueRowById.get(demoAccount.id) : undefined}
+              queueAutomationLoading={queueAutomationQuery.isLoading}
+              queueAutomationError={queueAutomationQuery.error instanceof Error ? queueAutomationQuery.error : null}
+              queueExpanded={demoAccount?.id ? queueExpandedIds.has(demoAccount.id) : false}
+              onToggleQueueExpand={() => {
+                const id = demoAccount?.id;
+                if (!id) return;
+                setQueueExpandedIds((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(id)) next.delete(id);
+                  else next.add(id);
+                  return next;
+                });
+              }}
+              onPutQueueAutomation={(enabled) => {
+                const id = demoAccount?.id;
+                if (!id) return;
+                putQueueAutomationMutation.mutate({ enabled, sourceConnectionId: id });
+              }}
+              putQueueAutomationPending={
+                putQueueAutomationMutation.isPending &&
+                putQueueAutomationMutation.variables?.sourceConnectionId === demoAccount?.id
+              }
+              onQueueGmailSyncAll={undefined}
+              queueGmailSyncAllPending={false}
             />
           ) : null}
           {gmailAccounts.map((account) => (
@@ -1722,6 +1783,28 @@ function SettingsRoute() {
               onSyncMock={() => syncMockMutation.mutate()}
               onResetDemo={() => demoResetMutation.mutate()}
               onClearDemo={() => demoClearMutation.mutate()}
+              queueAutomation={queueAutomationQuery.data}
+              queueRow={queueRowById.get(account.id)}
+              queueAutomationLoading={queueAutomationQuery.isLoading}
+              queueAutomationError={queueAutomationQuery.error instanceof Error ? queueAutomationQuery.error : null}
+              queueExpanded={queueExpandedIds.has(account.id)}
+              onToggleQueueExpand={() => {
+                setQueueExpandedIds((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(account.id)) next.delete(account.id);
+                  else next.add(account.id);
+                  return next;
+                });
+              }}
+              onPutQueueAutomation={(enabled) => {
+                putQueueAutomationMutation.mutate({ enabled, sourceConnectionId: account.id });
+              }}
+              putQueueAutomationPending={
+                putQueueAutomationMutation.isPending &&
+                putQueueAutomationMutation.variables?.sourceConnectionId === account.id
+              }
+              onQueueGmailSyncAll={() => queueGmailSyncAllMutation.mutate()}
+              queueGmailSyncAllPending={queueGmailSyncAllMutation.isPending}
             />
           ))}
         </div>
@@ -1831,6 +1914,16 @@ function SourceConnectionCard({
   onSyncMock,
   onResetDemo,
   onClearDemo,
+  queueAutomation,
+  queueRow,
+  queueAutomationLoading,
+  queueAutomationError,
+  queueExpanded,
+  onToggleQueueExpand,
+  onPutQueueAutomation,
+  putQueueAutomationPending,
+  onQueueGmailSyncAll,
+  queueGmailSyncAllPending,
 }: {
   source: ResolvedSource;
   sourceCounts: SourceCountsMap;
@@ -1850,6 +1943,16 @@ function SourceConnectionCard({
   onSyncMock: () => void;
   onResetDemo: () => void;
   onClearDemo: () => void;
+  queueAutomation?: QueueAutomationResponse;
+  queueRow?: QueueAutomationSourceRow;
+  queueAutomationLoading?: boolean;
+  queueAutomationError?: Error | null;
+  queueExpanded?: boolean;
+  onToggleQueueExpand?: () => void;
+  onPutQueueAutomation?: (enabled: boolean) => void;
+  putQueueAutomationPending?: boolean;
+  onQueueGmailSyncAll?: () => void;
+  queueGmailSyncAllPending?: boolean;
 }) {
   const Icon = source.entry.icon;
   const isDev = source.entry.key === "synthetic-local-dev";
@@ -1970,6 +2073,162 @@ function SourceConnectionCard({
           )
         )}
       </div>
+      {source.connected && source.account?.id && onToggleQueueExpand ? (
+        <div className="source-queue-expand" data-testid={`source-queue-expand-${source.account.id}`}>
+          <button
+            type="button"
+            className="source-queue-expand-trigger"
+            onClick={onToggleQueueExpand}
+            aria-expanded={Boolean(queueExpanded)}
+          >
+            {queueExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+            Background queue
+            {queueRow ? (
+              <span className="pill muted-pill" style={{ marginLeft: "auto" }}>
+                {queueRow.automationEffective ? "post-ingest on" : "post-ingest off"}
+              </span>
+            ) : queueAutomationLoading ? (
+              <Loader2 className="spin" size={16} style={{ marginLeft: "auto" }} />
+            ) : null}
+          </button>
+          {queueExpanded ? (
+            <div className="source-queue-expand-body">
+              {queueAutomationError ? (
+                <p className="muted">{queueAutomationError.message}</p>
+              ) : queueAutomationLoading && !queueAutomation ? (
+                <p className="muted">Loading queue status…</p>
+              ) : queueRow && queueAutomation && onPutQueueAutomation ? (
+                <>
+                  <p className="muted" style={{ marginTop: 0 }}>
+                    When on, a <strong>classification.batch</strong> job is enqueued after mail from this source is
+                    ingested (requires a running worker).
+                  </p>
+                  {isGmail && onQueueGmailSyncAll ? (
+                    <div style={{ marginTop: 12 }}>
+                      <button
+                        type="button"
+                        className="button"
+                        onClick={onQueueGmailSyncAll}
+                        disabled={Boolean(queueGmailSyncAllPending)}
+                        data-testid="queue-gmail-sync-all"
+                      >
+                        {queueGmailSyncAllPending ? (
+                          <Loader2 className="spin" size={16} />
+                        ) : (
+                          <RefreshCw size={16} />
+                        )}
+                        Queue sync for all Gmail accounts
+                      </button>
+                      <p className="muted" style={{ marginTop: 8, fontSize: "0.82rem" }}>
+                        Enqueues one <strong>source.sync</strong> job per connected mailbox (not only this card). Set{" "}
+                        <code>QUEUE_GMAIL_AUTO_POLL_INTERVAL_MS</code> (≥15000) on the API to repeat automatically.
+                      </p>
+                    </div>
+                  ) : null}
+                  {!queueAutomation.controlWritable ? (
+                    <p className="muted">
+                      API control is disabled in production unless <code>QUEUE_RUNTIME_CONTROL_ENABLED=true</code>.
+                    </p>
+                  ) : null}
+                  <div className="queue-automation-toggle" style={{ marginTop: 12 }}>
+                    <span className="muted" style={{ fontSize: "0.9rem" }}>
+                      {queueRow.automationEffective ? "On" : "Off"}
+                    </span>
+                    <button
+                      type="button"
+                      className="queue-switch-track"
+                      data-on={queueRow.automationEffective ? "true" : "false"}
+                      role="switch"
+                      aria-checked={queueRow.automationEffective}
+                      aria-label={`Post-ingest queue for ${source.email || source.account.id}`}
+                      disabled={!queueAutomation.controlWritable || Boolean(putQueueAutomationPending)}
+                      onClick={() => onPutQueueAutomation(!queueRow.automationEffective)}
+                    >
+                      <span className="queue-switch-thumb" />
+                    </button>
+                    {putQueueAutomationPending ? <Loader2 className="spin" size={18} /> : null}
+                  </div>
+                  <div className="queue-automation-meta" style={{ marginTop: 12 }}>
+                    <div>
+                      <strong>Source</strong> — {queueRow.email || queueRow.sourceConnectionId}
+                    </div>
+                    <div>
+                      <strong>Runtime override</strong> —{" "}
+                      {queueRow.automationRuntimeOverride === null
+                        ? "none (legacy global or env applies)"
+                        : queueRow.automationRuntimeOverride
+                          ? "on"
+                          : "off"}
+                    </div>
+                    <div>
+                      <strong>Env default</strong> —{" "}
+                      {queueAutomation.envDefault
+                        ? "QUEUE_AUTO_POST_INGEST_JOBS=true"
+                        : "QUEUE_AUTO_POST_INGEST_JOBS=false"}
+                    </div>
+                    <div>
+                      <strong>Queue driver</strong> — {queueAutomation.queue.driver} ·{" "}
+                      <strong>Batch size</strong> — {queueAutomation.queue.classificationBatchSize}
+                    </div>
+                    <div>
+                      <strong>Worker</strong> — {queueAutomation.worker.hint}
+                    </div>
+                  </div>
+                  <div className="queue-job-metrics">
+                    <div className="queue-job-metric">
+                      <span>Pending (this source)</span>
+                      <strong>{queueRow.jobsSample.byStatus.pending}</strong>
+                    </div>
+                    <div className="queue-job-metric">
+                      <span>Running</span>
+                      <strong>{queueRow.jobsSample.byStatus.running}</strong>
+                    </div>
+                    <div className="queue-job-metric">
+                      <span>Succeeded</span>
+                      <strong>{queueRow.jobsSample.byStatus.succeeded}</strong>
+                    </div>
+                    <div className="queue-job-metric">
+                      <span>Dead</span>
+                      <strong>{queueRow.jobsSample.byStatus.dead}</strong>
+                    </div>
+                  </div>
+                  <p className="muted" style={{ fontSize: "0.82rem" }}>
+                    Job counts filter the last {queueRow.jobsSample.limit} jobs where payload references this source.
+                  </p>
+                  {queueRow.jobsSample.recent.length > 0 ? (
+                    <div className="queue-recent-jobs">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Status</th>
+                            <th>Updated</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {queueRow.jobsSample.recent.map((job) => (
+                            <tr key={job.id}>
+                              <td>{job.name}</td>
+                              <td>{job.status}</td>
+                              <td className="muted">{job.updatedAt || job.runAt}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="muted" style={{ marginTop: 12 }}>
+                      No recent jobs for this source in the sample.
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="muted">Queue status for this source is not available yet.</p>
+              )}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

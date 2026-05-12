@@ -211,6 +211,20 @@ export async function readStoreFor(userId) {
   return filterStoreToUser(await readStore(), userId);
 }
 
+/** Distinct user ids that have at least one non-demo Gmail source (for auto-poll). */
+export async function listUserIdsWithActiveGmailSources() {
+  if (usePostgresStore()) return (await postgresStore()).listUserIdsWithActiveGmailSources();
+  const store = await readStore();
+  const ids = new Set();
+  const devId = loadConfig().auth.devUserId || "";
+  for (const a of store.accounts || []) {
+    if (!a || a.provider !== "gmail" || a.demo) continue;
+    if (a.userId) ids.add(a.userId);
+    else if (devId) ids.add(devId);
+  }
+  return [...ids];
+}
+
 export async function ensureUserRecord(userId, email = null) {
   if (!userId) throw new Error("ensureUserRecord requires a userId");
   if (usePostgresStore()) return (await postgresStore()).ensureUserRecord(userId, email);

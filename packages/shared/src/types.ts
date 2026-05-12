@@ -72,6 +72,58 @@ export type QueueJobSummary = {
   lastError?: string;
 };
 
+export type QueueAutomationSourceRow = {
+  sourceConnectionId: string;
+  provider: MailProvider;
+  email: string;
+  automationRuntimeOverride: boolean | null;
+  automationEffective: boolean;
+  jobsSample: {
+    limit: number;
+    byStatus: {
+      pending: number;
+      running: number;
+      succeeded: number;
+      dead: number;
+    };
+    recent: QueueJobSummary[];
+  };
+};
+
+export type QueueAutomationResponse = {
+  /** True if at least one connected source has post-ingest automation enabled. */
+  automationEnabled: boolean;
+  sources: QueueAutomationSourceRow[];
+  runtimeFile: {
+    path: string;
+    exists: boolean;
+    automationEnabled: boolean | null;
+    automationBySource: Record<string, boolean>;
+    updatedAt: string | null;
+  };
+  envDefault: boolean;
+  controlWritable: boolean;
+  queue: {
+    driver: string;
+    pollIntervalMs: number;
+    classificationBatchSize: number;
+  };
+  worker: {
+    hint: string;
+  };
+  /** All recent jobs (global sample). */
+  jobsSample: {
+    limit: number;
+    byStatus: {
+      pending: number;
+      running: number;
+      succeeded: number;
+      dead: number;
+    };
+    recent: QueueJobSummary[];
+  };
+};
+
 export type SourceConnectionStatus =
   | "active"
   | "paused"
@@ -227,6 +279,7 @@ export type AccountSummary = {
 };
 
 export type StatusResponse = {
+  authenticated?: boolean;
   account: AccountSummary | null;
   accounts: AccountSummary[];
   sourceCounts?: Array<{
@@ -404,6 +457,8 @@ export type AiDecision = {
   automated: boolean;
   direct: boolean;
   addressed?: boolean;
+  /** True when a later mailbox-sent message exists in the same provider thread (e.g. invite accept). */
+  resolvedBySentFollowUp?: boolean;
   confidence: number;
   recsysScore: number;
   suppressFromToday: boolean;

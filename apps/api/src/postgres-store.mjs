@@ -79,6 +79,19 @@ function sourceConnectionMetadata(account = {}) {
   };
 }
 
+/** Gmail sync cursor from source_sync_cursors (preferred over OAuth profile snapshot in metadata). */
+const ACCOUNT_SELECT_BASE = `
+      select sc.*, sas.encrypted_payload,
+             ssc_hist.cursor_value as gmail_sync_history_id
+        from source_connections sc
+        left join source_auth_secrets sas
+          on sas.source_connection_id = sc.id
+         and sas.secret_kind = 'oauth_tokens'
+        left join source_sync_cursors ssc_hist
+          on ssc_hist.source_connection_id = sc.id
+         and ssc_hist.cursor_kind = 'gmail_history_id'
+`;
+
 function accountFromRow(row) {
   const metadata = row.metadata || {};
   const tokens = row.encrypted_payload
@@ -93,7 +106,7 @@ function accountFromRow(row) {
     scope: Array.isArray(row.scope) ? row.scope.join(" ") : "",
     messagesTotal: metadata.messagesTotal ?? undefined,
     threadsTotal: metadata.threadsTotal ?? undefined,
-    historyId: metadata.historyId || undefined,
+    historyId: row.gmail_sync_history_id || metadata.historyId || undefined,
     demo: Boolean(metadata.demo),
     accessToken: tokens.accessToken || "",
     refreshToken: tokens.refreshToken || "",
@@ -106,11 +119,7 @@ function accountFromRow(row) {
 async function getAccountById(client, id) {
   const result = await client.query(
     `
-      select sc.*, sas.encrypted_payload
-      from source_connections sc
-      left join source_auth_secrets sas
-        on sas.source_connection_id = sc.id
-       and sas.secret_kind = 'oauth_tokens'
+      ${ACCOUNT_SELECT_BASE}
       where sc.id = $1
         and sc.deleted_at is null
       limit 1
@@ -235,11 +244,7 @@ export async function getPrimaryAccount() {
   return withClient(async (client) => {
     const result = await client.query(
       `
-        select sc.*, sas.encrypted_payload
-        from source_connections sc
-        left join source_auth_secrets sas
-          on sas.source_connection_id = sc.id
-         and sas.secret_kind = 'oauth_tokens'
+        ${ACCOUNT_SELECT_BASE}
         where sc.deleted_at is null
           and sc.status <> 'deleted'
         order by sc.created_at asc
@@ -255,11 +260,7 @@ export async function getPrimarySourceConnection(userId) {
   return withClient(async (client) => {
     const result = await client.query(
       `
-        select sc.*, sas.encrypted_payload
-        from source_connections sc
-        left join source_auth_secrets sas
-          on sas.source_connection_id = sc.id
-         and sas.secret_kind = 'oauth_tokens'
+        ${ACCOUNT_SELECT_BASE}
         where sc.deleted_at is null
           and sc.status <> 'deleted'
           and sc.user_id = $1
@@ -604,11 +605,7 @@ export async function upsertSyncedMessages(account, messages = []) {
 async function accountRows(client) {
   const result = await client.query(
     `
-      select sc.*, sas.encrypted_payload
-      from source_connections sc
-      left join source_auth_secrets sas
-        on sas.source_connection_id = sc.id
-       and sas.secret_kind = 'oauth_tokens'
+      ${ACCOUNT_SELECT_BASE}
       where sc.deleted_at is null
         and sc.status <> 'deleted'
       order by sc.created_at asc
@@ -767,11 +764,7 @@ async function briefingRows(client, limit = 50) {
 async function accountRowsForUser(client, userId) {
   const result = await client.query(
     `
-      select sc.*, sas.encrypted_payload
-      from source_connections sc
-      left join source_auth_secrets sas
-        on sas.source_connection_id = sc.id
-       and sas.secret_kind = 'oauth_tokens'
+      ${ACCOUNT_SELECT_BASE}
       where sc.deleted_at is null
         and sc.status <> 'deleted'
         and sc.user_id = $1
@@ -943,6 +936,22 @@ export async function readStoreFor(userId) {
     inboxBriefings: await briefingRowsForUser(client, userId),
     verificationRuns: await verificationRunRows(client),
   }));
+}
+
+export async function listUserIdsWithActiveGmailSources() {
+  return withClient(async (client) => {
+    const result = await client.query(
+      `
+        select distinct sc.user_id
+          from source_connections sc
+         where sc.deleted_at is null
+           and sc.status <> 'deleted'
+           and sc.provider = 'gmail'
+           and coalesce((sc.metadata->>'demo')::boolean, false) = false
+      `,
+    );
+    return result.rows.map((row) => row.user_id).filter(Boolean);
+  });
 }
 
 export async function listAiRunsFor(userId, limit = 50) {

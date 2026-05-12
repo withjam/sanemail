@@ -1,8 +1,10 @@
 import { loadConfig } from "./config.mjs";
 import { enqueueJob } from "./queue.mjs";
+import { isQueueAutomationEnabledForSource } from "./queue-runtime.mjs";
 
 export async function maybeEnqueuePostIngestClassification(account, config = loadConfig()) {
-  if (!account || !config.queue.autoPostIngestJobs) return null;
+  if (!account) return null;
+  if (!(await isQueueAutomationEnabledForSource(account.id))) return null;
 
   const userId = account.userId || account.id;
   return enqueueJob("classification.batch", {

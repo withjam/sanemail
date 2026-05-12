@@ -306,13 +306,15 @@ export async function listQueueJobs(limit = 50) {
     const pool = await graphilePoolInstance();
     const result = await pool.query(
       `select id, queue_name, task_identifier, run_at, attempts, max_attempts,
-              last_error, created_at, updated_at, key, locked_at
+              last_error, created_at, updated_at, key, locked_at, payload
          from graphile_worker.jobs
         order by run_at desc, created_at desc
         limit $1`,
       [limit],
     );
-    return result.rows.map((job) => graphileJobSummary(job));
+    return result.rows.map((job) =>
+      graphileJobSummary(job, typeof job.payload === "object" && job.payload ? job.payload : {}),
+    );
   }
 
   const store = await readStore();

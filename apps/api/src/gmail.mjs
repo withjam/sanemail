@@ -91,6 +91,130 @@ async function gmailFetch(account, path, options = {}) {
   return response.json();
 }
 
+/** Raised when users.history.list returns 404 (cursor older than retained history). */
+export class GmailHistoryExpiredError extends Error {
+  constructor(message = "Gmail history cursor expired; full sync required.") {
+    super(message);
+    this.name = "GmailHistoryExpiredError";
+  }
+}
+
+export function maxHistoryIdFromMessages(messages = []) {
+  let max = null;
+  for (const message of messages) {
+    const h = message?.historyId;
+    if (!h) continue;
+    try {
+      const hStr = String(h);
+      if (max === null || BigInt(hStr) > BigInt(max)) max = hStr;
+    } catch {
+      /* ignore non-numeric */
+    }
+  }
+  return max;
+}
+
+function collectMessageIdsFromHistoryPage(page) {
+  const toFetch = new Set();
+  const deleted = new Set();
+  for (const record of page.history || []) {
+    for (const entry of record.messagesAdded || []) {
+      const id = entry.message?.id;
+      if (id) toFetch.add(id);
+    }
+    for (const entry of record.labelsAdded || []) {
+      const id = entry.message?.id;
+      if (id) toFetch.add(id);
+    }
+    for (const entry of record.labelsRemoved || []) {
+      const id = entry.message?.id;
+      if (id) toFetch.add(id);
+    }
+    for (const entry of record.messagesDeleted || []) {
+      const id = entry.message?.id;
+      if (id) deleted.add(id);
+    }
+  }
+  return { toFetch, deleted };
+}
+
+/**
+ * One page of users.history.list. First page uses startHistoryId; later pages use pageToken only.
+ */
+export async function listHistoryPage(account, { startHistoryId, pageToken, maxResults = 500 } = {}) {
+  const params = new URLSearchParams({ maxResults: String(maxResults) });
+  if (pageToken) {
+    params.set("pageToken", pageToken);
+  } else if (startHistoryId) {
+    params.set("startHistoryId", String(startHistoryId));
+  } else {
+    throw new Error("listHistoryPage requires startHistoryId or pageToken");
+  }
+
+  const response = await fetch(`${gmailBaseUrl}/history?${params.toString()}`, {
+    headers: {
+      Authorization: `Bearer ${account.accessToken}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (response.status === 404) {
+    const detail = await response.text();
+    throw new GmailHistoryExpiredError(detail || undefined);
+  }
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Gmail API ${response.status}: ${detail}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Partial sync: history.list → messages.get for affected IDs.
+ * Returns mailboxHistoryId from the API for cursor advancement (per Gmail partial sync guidance).
+ */
+export async function syncIncrementalFromHistory(account, startHistoryId) {
+  let pageToken;
+  let first = true;
+  let mailboxHistoryId = null;
+  const idsToFetch = new Set();
+  const deletedIds = new Set();
+
+  while (true) {
+    const page = await listHistoryPage(account, {
+      startHistoryId: first ? String(startHistoryId) : undefined,
+      pageToken,
+      maxResults: 500,
+    });
+    first = false;
+    pageToken = page.nextPageToken;
+
+    const { toFetch, deleted } = collectMessageIdsFromHistoryPage(page);
+    for (const id of toFetch) idsToFetch.add(id);
+    for (const id of deleted) deletedIds.add(id);
+
+    if (page.historyId) {
+      mailboxHistoryId = String(page.historyId);
+    }
+
+    if (!pageToken) break;
+  }
+
+  const messages = [];
+  for (const id of idsToFetch) {
+    const gmailMessage = await getMessage(account, id);
+    messages.push(normalizeGmailMessage(account, gmailMessage));
+  }
+
+  return {
+    messages,
+    mailboxHistoryId,
+    deletedIds: [...deletedIds],
+  };
+}
+
 export function buildGoogleAuthUrl(config, state) {
   const params = new URLSearchParams({
     client_id: config.google.clientId,

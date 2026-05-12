@@ -111,6 +111,12 @@ export function loadConfig() {
       query: process.env.SYNC_QUERY || "newer_than:90d -in:chats",
       backfillMessageLimit: Number(process.env.SYNC_BACKFILL_MESSAGE_LIMIT || process.env.SYNC_MESSAGE_LIMIT || 50),
       backfillCutoffDays: Number(process.env.SYNC_BACKFILL_CUTOFF_DAYS || 90),
+      /** Use users.history.list when a cursor exists (disable for debugging). Defaults to on when unset. */
+      gmailIncremental: (() => {
+        const raw = process.env.SYNC_GMAIL_INCREMENTAL;
+        if (raw === undefined) return true;
+        return booleanEnv("SYNC_GMAIL_INCREMENTAL", false);
+      })(),
     },
     queue: {
       driver: process.env.QUEUE_DRIVER || "local-json",
@@ -118,6 +124,8 @@ export function loadConfig() {
       pollIntervalMs: Number(process.env.QUEUE_POLL_INTERVAL_MS || 1000),
       classificationBatchSize: Number(process.env.CLASSIFICATION_BATCH_SIZE || 10),
       autoPostIngestJobs: booleanEnv("QUEUE_AUTO_POST_INGEST_JOBS", false),
+      /** When >= 15000, API periodically enqueues source.sync for every Gmail connection (all users). 0 = off. */
+      gmailAutoPollIntervalMs: Number(process.env.QUEUE_GMAIL_AUTO_POLL_INTERVAL_MS || 0),
     },
     ai: {
       timeoutMs: Number(process.env.AI_TIMEOUT_MS || 120_000),

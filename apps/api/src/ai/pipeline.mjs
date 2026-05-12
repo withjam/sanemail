@@ -5,6 +5,8 @@ import {
   classifyMessage,
   isSentByMailbox,
 } from "../classifier.mjs";
+import { stripQuotedEmailTail } from "../email-quote-strip.mjs";
+import { effectiveClassificationBodyText } from "../thread-copy-dedupe.mjs";
 import { extractCompletionEvents } from "../completion-extract.mjs";
 import {
   getPrimarySourceConnection,
@@ -21,19 +23,59 @@ import {
 import { traceAiRun } from "./phoenix.mjs";
 import { getPromptSnapshots, hashValue, renderPrompt } from "./prompts.mjs";
 
+const SENT_BODY_PREVIEW_CHARS = 480;
+
 function sentMailContextForReconciliation(store, account, limit = 20) {
   return [...(store.messages || [])]
     .filter((message) => !account?.id || message.accountId === account.id)
     .filter((message) => isSentByMailbox(message, account))
     .sort((a, b) => messageDeliveredAtMs(b) - messageDeliveredAtMs(a))
     .slice(0, limit)
-    .map((message) => ({
-      messageId: message.id,
-      deliveredAt: message.date || null,
-      subject: message.subject || "",
-      to: message.to || message.headers?.to || "",
-      snippet: message.snippet || "",
-    }));
+    .map((message) => {
+      const stripped = stripQuotedEmailTail(message.bodyText || "");
+      const bodyPreview =
+        stripped.length > SENT_BODY_PREVIEW_CHARS
+          ? `${stripped.slice(0, SENT_BODY_PREVIEW_CHARS)}…`
+          : stripped;
+      return {
+        messageId: message.id,
+        deliveredAt: message.date || null,
+        subject: message.subject || "",
+        to: message.to || message.headers?.to || "",
+        snippet: message.snippet || "",
+        bodyPreview,
+      };
+    });
+}
+
+/** Inbound messages followed by any mailbox-sent message in the same thread (same Gmail threadId). */
+export function buildThreadReplyResolvedMessageIds(messages = [], account) {
+  if (!account) return new Set();
+  const byThread = new Map();
+  for (const message of messages) {
+    if (!message) continue;
+    if (account.id && message.accountId !== account.id) continue;
+    const tid = String(message.providerThreadId || "").trim();
+    if (!tid) continue;
+    if (!byThread.has(tid)) byThread.set(tid, []);
+    byThread.get(tid).push(message);
+  }
+  const resolved = new Set();
+  for (const list of byThread.values()) {
+    const sorted = [...list].sort((a, b) => messageDeliveredAtMs(a) - messageDeliveredAtMs(b));
+    for (let i = 0; i < sorted.length; i++) {
+      if (isSentByMailbox(sorted[i], account)) continue;
+      const t0 = messageDeliveredAtMs(sorted[i]);
+      for (let j = i + 1; j < sorted.length; j++) {
+        if (messageDeliveredAtMs(sorted[j]) < t0) continue;
+        if (isSentByMailbox(sorted[j], account)) {
+          resolved.add(sorted[i].id);
+          break;
+        }
+      }
+    }
+  }
+  return resolved;
 }
 
 const actionPatterns = [
@@ -71,11 +113,12 @@ function senderName(from) {
 }
 
 function textForMessage(message) {
-  return `${message.subject || ""}\n${message.snippet || ""}\n${message.bodyText || ""}`;
+  const body = stripQuotedEmailTail(message.bodyText || "");
+  return `${message.subject || ""}\n${message.snippet || ""}\n${body}`;
 }
 
 function wordCountForMessage(message) {
-  const body = `${message.subject || ""} ${message.bodyText || message.snippet || ""}`;
+  const body = `${message.subject || ""} ${stripQuotedEmailTail(message.bodyText || "")} ${message.snippet || ""}`;
   const tokens = body.trim().split(/\s+/).filter(Boolean);
   return tokens.length;
 }
@@ -175,7 +218,7 @@ function feedbackState(feedbackEntries = []) {
 }
 
 function isDecisionAddressed(decision) {
-  return Boolean(decision.feedback?.addressed);
+  return Boolean(decision.feedback?.addressed || decision.resolvedBySentFollowUp);
 }
 
 function feedbackBoost(kinds) {
@@ -235,45 +278,57 @@ function rankDecision(classification, actions, deadlines, messageAgeHours, feedb
   };
 }
 
-function decisionForMessage(message, account, feedback) {
-  const text = textForMessage(message);
+function decisionForMessage(message, account, feedback, threadReplyResolvedIds, threadCorpusMessages) {
+  const bodyEffective = effectiveClassificationBodyText(message, threadCorpusMessages || []);
+  const messageForClassification = { ...message, bodyText: bodyEffective };
+  const text = textForMessage(messageForClassification);
   const messageAgeHours = Number(ageHours(message).toFixed(2));
   const feedbackEntries = feedbackEntriesForMessage(feedback, message.id);
   const messageFeedback = feedbackState(feedbackEntries);
   const classification = applyFeedbackToClassification(
-    classifyMessage(message, account),
+    classifyMessage(messageForClassification, account),
     feedbackEntries,
   );
+  const userInsistsReply = messageFeedback.latestKind === "needs-reply";
+  const sentFollowUpInThread =
+    threadReplyResolvedIds instanceof Set && threadReplyResolvedIds.has(message.id);
+  const resolvedBySentFollowUp =
+    Boolean(sentFollowUpInThread) && !userInsistsReply && !messageFeedback.addressed;
   const feedbackKinds = messageFeedback.kinds;
   const actions = extractActions(text);
   const deadlines = extractDeadlines(text);
   const completions = extractCompletionEvents(text, message.date);
-  const entities = extractEntities(message);
+  const entities = extractEntities(messageForClassification);
+  const bodyForModel = bodyEffective;
   const triagePrompt = renderPrompt("mail-triage", {
     subject: message.subject,
     from: message.from,
     to: message.to,
     labels: message.sourceLabels || [],
     snippet: message.snippet,
-    bodyText: message.bodyText,
+    bodyText: bodyForModel,
   });
   const extractPrompt = renderPrompt("mail-extract", {
     subject: message.subject,
     from: message.from,
     snippet: message.snippet,
-    bodyText: message.bodyText,
+    bodyText: bodyForModel,
   });
-  const rank = rankDecision(classification, actions, deadlines, messageAgeHours, feedbackKinds);
+  const classificationForRank = {
+    ...classification,
+    needsReply: classification.needsReply && !resolvedBySentFollowUp,
+  };
+  const rank = rankDecision(classificationForRank, actions, deadlines, messageAgeHours, feedbackKinds);
   const rankPrompt = renderPrompt("mail-rank", {
     category: classification.category,
-    needsReply: classification.needsReply,
+    needsReply: classificationForRank.needsReply,
     possibleJunk: classification.possibleJunk,
     direct: classification.direct,
     ageHours: messageAgeHours,
     feedback: feedbackKinds.join(", "),
   });
 
-  const wordCount = wordCountForMessage(message);
+  const wordCount = wordCountForMessage(messageForClassification);
 
   return {
     messageId: message.id,
@@ -281,14 +336,14 @@ function decisionForMessage(message, account, feedback) {
     from: message.from,
     deliveredAt: message.date,
     category: classification.category,
-    needsReply: classification.needsReply,
+    needsReply: classificationForRank.needsReply,
     possibleJunk: classification.possibleJunk,
     automated: classification.automated,
     direct: classification.direct,
     addressed: messageFeedback.addressed,
-    confidence: confidenceFor(classification, actions, deadlines),
+    confidence: confidenceFor(classificationForRank, actions, deadlines),
     recsysScore: rank.recsysScore,
-    suppressFromToday: rank.suppressFromToday,
+    suppressFromToday: rank.suppressFromToday || resolvedBySentFollowUp,
     temporal: {
       deliveredAt: message.date,
       ageHours: messageAgeHours,
@@ -303,9 +358,10 @@ function decisionForMessage(message, account, feedback) {
       deadlines,
       entities,
       completions,
-      replyCue: classification.needsReply ? "reply-likely" : null,
+      replyCue: classificationForRank.needsReply ? "reply-likely" : null,
     },
     feedback: messageFeedback,
+    resolvedBySentFollowUp,
     embedding: embeddingSummary(text),
     instrumentation: {
       inputHash: hashValue({
@@ -313,7 +369,7 @@ function decisionForMessage(message, account, feedback) {
         from: message.from,
         date: message.date,
         snippet: message.snippet,
-        bodyText: message.bodyText,
+        bodyText: bodyEffective,
       }),
       promptInputHashes: [
         hashValue(triagePrompt.user),
@@ -1043,6 +1099,8 @@ export function runAiLoopOnMessages({
   previousBriefing = null,
   briefingSelection = null,
   memory = null,
+  threadReplyResolvedIds = null,
+  threadCorpusMessages = null,
 } = {}) {
   const startedAt = nowIso();
   const runStart = Date.now();
@@ -1060,7 +1118,9 @@ export function runAiLoopOnMessages({
   spans.push(createSpan("prompt.resolve", promptStart, { promptCount: promptRefs.length }));
 
   const modelStart = Date.now();
-  const decisions = scopedMessages.map((message) => decisionForMessage(message, account || {}, feedback));
+  const decisions = scopedMessages.map((message) =>
+    decisionForMessage(message, account || {}, feedback, threadReplyResolvedIds, threadCorpusMessages),
+  );
   spans.push(createSpan("model.mock_inference", modelStart, { decisionCount: decisions.length }));
   const briefingMemory =
     memory || (briefingSelection ? memoryFromSelection(briefingSelection, decisions) : null);
@@ -1289,7 +1349,12 @@ async function applyOllamaProvider(
   config,
   previousBriefing = null,
   memory = null,
-  { briefingOnly = false, generateBriefing = true, sentMail = [] } = {},
+  {
+    briefingOnly = false,
+    generateBriefing = true,
+    sentMail = [],
+    threadCorpusMessages = null,
+  } = {},
 ) {
   const started = Date.now();
   const fallbackById = new Map(run.output.decisions.map((decision) => [decision.messageId, decision]));
@@ -1335,10 +1400,15 @@ async function applyOllamaProvider(
       const fallback = fallbackById.get(message.id);
       if (!fallback) continue;
 
+      const messageForLlm = {
+        ...message,
+        bodyText: effectiveClassificationBodyText(message, threadCorpusMessages || []),
+      };
+
       let result;
       const classificationStarted = Date.now();
       try {
-        result = await classifyWithOllama({ config, message, fallback });
+        result = await classifyWithOllama({ config, message: messageForLlm, fallback });
       } catch (error) {
         recordLlmCall(run, {
           pipeline: "classification_batch",
@@ -1357,7 +1427,11 @@ async function applyOllamaProvider(
           evalCount: 0,
           thinkingChars: 0,
           error: publicError(error),
-          ...llmTracePayloadFromClassification(config, buildClassificationMessages(message, fallback), null),
+          ...llmTracePayloadFromClassification(
+            config,
+            buildClassificationMessages(messageForLlm, fallback),
+            null,
+          ),
         });
         throw error;
       }
@@ -1380,7 +1454,7 @@ async function applyOllamaProvider(
         thinkingChars: result.meta.thinkingChars,
         ...llmTracePayloadFromClassification(
           config,
-          buildClassificationMessages(message, fallback),
+          buildClassificationMessages(messageForLlm, fallback),
           result.decision,
         ),
       });
@@ -1572,9 +1646,18 @@ export async function runAiLoop({
     if (!feedbackByMessage.has(entry.messageId)) feedbackByMessage.set(entry.messageId, []);
     feedbackByMessage.get(entry.messageId).push(entry);
   }
+  const accountMessagesForThread = [...(store.messages || [])].filter(
+    (message) => !account?.id || message.accountId === account.id,
+  );
   const isJunkMessage = (message) => {
     const classification = applyFeedbackToClassification(
-      classifyMessage(message, account || {}),
+      classifyMessage(
+        {
+          ...message,
+          bodyText: effectiveClassificationBodyText(message, accountMessagesForThread),
+        },
+        account || {},
+      ),
       feedbackByMessage.get(message.id) || [],
     );
     return classification.possibleJunk;
@@ -1608,6 +1691,7 @@ export async function runAiLoop({
   const messages = selection.selected;
   const contextBriefing = selection.mode === "iterative" ? previousBriefing : null;
   const sentMail = generateBriefing ? sentMailContextForReconciliation(store, account, 20) : [];
+  const threadReplyResolvedIds = buildThreadReplyResolvedMessageIds(accountMessagesForThread, account);
   aiDebugLog("ollama run", {
     effectiveLimit,
     briefingFlow: selection.mode,
@@ -1638,6 +1722,8 @@ export async function runAiLoop({
     includeBriefing: generateBriefing,
     previousBriefing: contextBriefing,
     briefingSelection: generateBriefing ? selection : null,
+    threadReplyResolvedIds,
+    threadCorpusMessages: accountMessagesForThread,
   });
   run.promptRefs = getPromptSnapshots({
     "mail-message-classification": {
@@ -1687,6 +1773,7 @@ export async function runAiLoop({
     briefingOnly,
     generateBriefing,
     sentMail,
+    threadCorpusMessages: accountMessagesForThread,
   });
   console.log("[ai run] finished", {
     runId: run.id,

@@ -1,12 +1,23 @@
 import { loadConfig } from "./config.mjs";
 import { syncMockSource } from "./demo-data.mjs";
-import { refreshAccessToken, syncBackfillOlderMessages, syncRecentMessages } from "./gmail.mjs";
+import {
+  GmailHistoryExpiredError,
+  maxHistoryIdFromMessages,
+  refreshAccessToken,
+  syncBackfillOlderMessages,
+  syncIncrementalFromHistory,
+  syncRecentMessages,
+} from "./gmail.mjs";
 import {
   getPrimarySourceConnection,
   readStoreFor,
   upsertAccount,
   upsertSyncedMessages,
 } from "./store.mjs";
+
+function accountHasSyncedMessages(store, accountId) {
+  return (store?.messages || []).some((message) => message?.accountId === accountId);
+}
 
 function oldestMessageDateForStore(store, accountId) {
   const messages = (store?.messages || []).filter((message) => message?.accountId === accountId);
@@ -81,7 +92,6 @@ export async function syncSourceConnection({
     throw new Error(`Unsupported source provider for sync: ${gmailAccount.provider || sourceProvider}`);
   }
 
-  let messages = [];
   if (cursorHint === "backfill_older") {
     const store = await readStoreFor(userId);
     const oldestIso = oldestMessageDateForStore(store, gmailAccount.id);
@@ -100,11 +110,63 @@ export async function syncSourceConnection({
     }
     // Move the boundary slightly earlier to avoid re-fetching the current oldest.
     const beforeDate = new Date(new Date(oldestIso).getTime() - 1000);
-    messages = await syncBackfillOlderMessages(config, gmailAccount, { beforeDate });
+    const messages = await syncBackfillOlderMessages(config, gmailAccount, { beforeDate });
+    const result = await upsertSyncedMessages(gmailAccount, messages);
+    const nextCursor =
+      maxHistoryIdFromMessages(messages) || gmailAccount.historyId;
+    if (nextCursor) {
+      await upsertAccount({ ...gmailAccount, historyId: String(nextCursor) });
+    }
+    return {
+      account: gmailAccount,
+      result,
+      provider: "gmail",
+      trigger,
+    };
+  }
+
+  const store = await readStoreFor(userId);
+  const hasSyncedMail = accountHasSyncedMessages(store, gmailAccount.id);
+  let messages = [];
+  let mailboxHistoryIdForCursor = null;
+
+  const canTryIncremental =
+    config.sync.gmailIncremental &&
+    hasSyncedMail &&
+    gmailAccount.historyId &&
+    cursorHint === "latest";
+
+  if (canTryIncremental) {
+    try {
+      const incremental = await syncIncrementalFromHistory(
+        gmailAccount,
+        String(gmailAccount.historyId),
+      );
+      messages = incremental.messages;
+      mailboxHistoryIdForCursor = incremental.mailboxHistoryId || null;
+      // deletedIds reserved for soft-delete / tombstone handling (Phase A follow-up).
+    } catch (error) {
+      if (error instanceof GmailHistoryExpiredError) {
+        messages = await syncRecentMessages(config, gmailAccount);
+        mailboxHistoryIdForCursor = maxHistoryIdFromMessages(messages);
+      } else {
+        throw error;
+      }
+    }
   } else {
     messages = await syncRecentMessages(config, gmailAccount);
+    mailboxHistoryIdForCursor = maxHistoryIdFromMessages(messages);
   }
+
   const result = await upsertSyncedMessages(gmailAccount, messages);
+  const nextCursor =
+    mailboxHistoryIdForCursor ||
+    maxHistoryIdFromMessages(messages) ||
+    gmailAccount.historyId;
+  if (nextCursor) {
+    await upsertAccount({ ...gmailAccount, historyId: String(nextCursor) });
+  }
+
   return {
     account: gmailAccount,
     result,

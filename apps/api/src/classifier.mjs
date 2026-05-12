@@ -1,3 +1,6 @@
+import { stripQuotedEmailTail } from "./email-quote-strip.mjs";
+import { effectiveClassificationBodyText } from "./thread-copy-dedupe.mjs";
+
 const automatedPatterns = [
   "no-reply",
   "noreply",
@@ -151,7 +154,9 @@ export function applyFeedbackToClassification(classification, feedback = []) {
 
 export function classifyMessage(message, account) {
   const headers = message.headers || {};
-  const text = `${message.subject || ""}\n${message.snippet || ""}\n${message.bodyText || ""}`;
+  const bodyForSignals = stripQuotedEmailTail(message.bodyText || "");
+  const text = `${message.subject || ""}\n${message.snippet || ""}\n${bodyForSignals}`;
+  const fullText = `${message.subject || ""}\n${message.snippet || ""}\n${message.bodyText || ""}`;
   const labels = message.sourceLabels || [];
   const from = message.from || headers.from || "";
   const direct = recipientContains(headers, account.email);
@@ -163,7 +168,7 @@ export function classifyMessage(message, account) {
     );
   const possibleJunk =
     labels.includes("SPAM") ||
-    includesAny(text, junkPatterns) ||
+    includesAny(fullText, junkPatterns) ||
     includesAny(from, ["security-alert", "account-verify"]);
   const asksQuestion = text.includes("?");
   const hasActionLanguage = includesAny(text, actionPatterns);
@@ -211,15 +216,31 @@ export function classifyMessage(message, account) {
   };
 }
 
+/**
+ * @param {object} store
+ * @param {object | null} account — When set, only that source's messages (single-mailbox views/tests).
+ *   When null, every message in the store is classified using its own `message.accountId` mailbox.
+ */
 export function getClassifiedMessages(store, account) {
-  return store.messages
-    .filter((message) => !account || message.accountId === account.id)
-    .map((message) => ({
+  const corpus = store.messages || [];
+  const messages = account ? corpus.filter((message) => message.accountId === account.id) : corpus;
+  const accountsById = new Map((store.accounts || []).filter(Boolean).map((a) => [a.id, a]));
+
+  return messages.map((message) => {
+    const mailbox = accountsById.get(message.accountId) || account || {};
+    return {
       ...message,
       sane: applyFeedbackToClassification(
-        classifyMessage(message, account || {}),
+        classifyMessage(
+          {
+            ...message,
+            bodyText: effectiveClassificationBodyText(message, corpus),
+          },
+          mailbox,
+        ),
         store.feedback.filter((entry) => entry.messageId === message.id),
       ),
       feedback: store.feedback.filter((entry) => entry.messageId === message.id),
-    }));
+    };
+  });
 }

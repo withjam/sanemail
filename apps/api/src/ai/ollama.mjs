@@ -1,4 +1,5 @@
 import { Ollama } from "ollama";
+import { stripQuotedEmailTail } from "../email-quote-strip.mjs";
 import { renderPrompt } from "./prompts.mjs";
 
 function clientHost(host) {
@@ -495,19 +496,20 @@ export function buildClassificationMessages(message, fallback) {
 }
 
 function buildMessages(message, fallback) {
+  const bodyForModel = stripQuotedEmailTail(message.bodyText || "");
   const triagePrompt = renderPrompt("mail-triage", {
     subject: message.subject,
     from: message.from,
     to: message.to,
     labels: message.sourceLabels || [],
     snippet: message.snippet,
-    bodyText: message.bodyText,
+    bodyText: bodyForModel,
   });
   const extractPrompt = renderPrompt("mail-extract", {
     subject: message.subject,
     from: message.from,
     snippet: message.snippet,
-    bodyText: message.bodyText,
+    bodyText: bodyForModel,
   });
   const rankPrompt = renderPrompt("mail-rank", {
     category: fallback.category,
